@@ -10,6 +10,7 @@ using BepInEx.Bootstrap;
 using RevivalMod.Fika;
 using RevivalMod.Patches;
 using RevivalMod.Helpers;
+using System.Reflection;
 
 namespace RevivalMod
 {
@@ -40,11 +41,31 @@ namespace RevivalMod
             new GameStartedPatch().Enable();
 
             LogSource.LogInfo("Revival plugin initialized! Press F5 to use your defibrillator when in critical state.");
+          
+            TryInitFikaAssembly();
         }
 
         private void OnEnable()
         {
-            FikaInterface.InitOnPluginEnabled();
+            FikaBridge.PluginEnable();
+        }
+
+        void TryInitFikaAssembly()
+        {
+            if (!FikaInstalled) return;
+            try
+            {
+                Assembly fikaModuleAssembly = Assembly.Load("RevivalMod-Fika");
+
+                Type main = fikaModuleAssembly.GetType("RevivalMod.FikaModule.Main");
+                MethodInfo init = main.GetMethod("Init");
+
+                init.Invoke(main, null);
+            }
+            catch (Exception ex)
+            {
+                LogSource.LogError($"Error loading Fika assembly: {ex.Message}");
+            }
         }
     }
 }

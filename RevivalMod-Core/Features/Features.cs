@@ -16,8 +16,6 @@ using RevivalMod.Helpers;
 using RevivalMod.Fika;
 using EFT.Interactive;
 using RevivalMod.Components;
-using Fika.Core.Coop.Utils;
-using Fika.Core.Networking;
 using EFT.UI;
 
 namespace RevivalMod.Features
@@ -359,7 +357,7 @@ namespace RevivalMod.Features
                 player.MovementContext.IsInPronePose = true;
                 player.SetEmptyHands(null);
                 player.ActiveHealthController.IsAlive = false;
-                FikaInterface.SendPlayerPositionPacket(playerId, new DateTime(), player.Position);
+                FikaBridge.SendPlayerPositionPacket(playerId, new DateTime(), player.Position);
                 Plugin.LogSource.LogDebug($"Applied improved stealth mode to player {playerId}");
                 Plugin.LogSource.LogDebug($"Stealth Mode Variables, Current Awareness: {player.Awareness}, IsAlive: {player.ActiveHealthController.IsAlive}");
             }
@@ -470,7 +468,7 @@ namespace RevivalMod.Features
                     ConsumeDefibItem(player);
                 }
 
-                FikaInterface.SendRemovePlayerFromCriticalPlayersListPacket(playerId);
+                FikaBridge.SendRemovePlayerFromCriticalPlayersListPacket(playerId);
 
                 // Apply revival effects - now with limited healing
                 ApplyRevivalEffects(player);
@@ -523,8 +521,8 @@ namespace RevivalMod.Features
                 ConsumeDefibItem(reviver);
                 RMSession.RemovePlayerFromCriticalPlayers(playerId);
                     
-                FikaInterface.SendRemovePlayerFromCriticalPlayersListPacket(playerId);
-                FikaInterface.SendReviveMePacket(playerId, reviver.ProfileId);
+                FikaBridge.SendRemovePlayerFromCriticalPlayersListPacket(playerId);
+                FikaBridge.SendReviveMePacket(playerId, reviver.ProfileId);
                       
                 return true;
     
@@ -823,7 +821,7 @@ namespace RevivalMod.Features
 
                 // Remove player from critical players list for network sync
                 RMSession.RemovePlayerFromCriticalPlayers(playerId);
-                FikaInterface.SendRemovePlayerFromCriticalPlayersListPacket(playerId);
+                FikaBridge.SendRemovePlayerFromCriticalPlayersListPacket(playerId);
 
                 // Show notification about death
                 NotificationManagerClass.DisplayMessageNotification(

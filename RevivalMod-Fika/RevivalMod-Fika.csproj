@@ -111,23 +111,24 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="Components\RMSession.cs" />
-    <Compile Include="Constants\Constants.cs" />
+    <Compile Include="Fika\FikaMethods.cs" />
     <Compile Include="Helpers\ConfigurationManagerAttributes.cs" />
     <Compile Include="Helpers\Settings.cs" />
-    <Compile Include="Models\ServerDataPack.cs" />
+    <Compile Include="Main.cs" />
+    <Compile Include="Packets\Packets.cs" />
     <Compile Include="Patches\DeathPatch.cs" />
-    <Compile Include="Features\Features.cs" />
-    <Compile Include="Fika\FikaInterface.cs" />
-    <Compile Include="Fika\FikaWrapper.cs" />
-    <Compile Include="Helpers\Packets.cs" />
     <Compile Include="Helpers\Utils.cs" />
     <Compile Include="Patches\GameStartedPatch.cs" />
-    <Compile Include="Plugin.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\RevivalMod-Core\RevivalMod.csproj">
+      <Project>{9076ade2-f4ee-4b5d-b9a6-29a054cf0a7e}</Project>
+      <Name>RevivalMod</Name>
+    </ProjectReference>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <PropertyGroup>
-    <PostBuildEvent>copy "$(TargetPath)" "$(ProjectDir)\..\..\BepInEx\plugins\$(TargetFileName)"</PostBuildEvent>
+    <PostBuildEvent>copy "$(TargetPath)" "C:\SPTDEV3.11\BepInEx\plugins\$(TargetFileName)"</PostBuildEvent>
   </PropertyGroup>
 </Project>

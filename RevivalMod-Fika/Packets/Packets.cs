@@ -1,9 +1,8 @@
-﻿using Fika.Core.Networking;
-using LiteNetLib.Utils;
+﻿using LiteNetLib.Utils;
 using System;
 using UnityEngine;
 
-namespace RevivalMod.Packets
+namespace RevivalMod.FikaModule.Packets
 {
 
     public struct ReviveMePacket : INetSerializable
