@@ -286,7 +286,7 @@ namespace RevivalMod.Features
                 player.ActiveHealthController.DoStun(Settings.REVIVAL_DURATION.Value / 2, 1f);
 
                 // Severe movement restrictions - extremely slow movement
-                player.Physical.WalkSpeedLimit = 0f; // No movement
+                player.Physical.WalkSpeedLimit = MOVEMENT_SPEED_MULTIPLIER; // No movement
 
                 // Restrict player to crouch-only
                 if (player.MovementContext != null)
