@@ -39,7 +39,7 @@ namespace RevivalMod.Features
         private static Dictionary<string, bool> _playerIsInvulnerable = new Dictionary<string, bool>();
         private static Dictionary<string, float> _playerInvulnerabilityTimers = new Dictionary<string, float>();
         private static Dictionary<string, float> _playerCriticalStateTimers = new Dictionary<string, float>();
-        //private static Dictionary<string, float> _originalAwareness = new Dictionary<string, float>(); // Renamed from _criticalModeTags
+        private static Dictionary<string, float> _originalAwareness = new Dictionary<string, float>(); // Renamed from _criticalModeTags
         private static Dictionary<string, float> _originalMovementSpeed = new Dictionary<string, float>(); // Store original movement speed
         private static Dictionary<string, EFT.PlayerAnimator.EWeaponAnimationType> _originalWeaponAnimationType = new Dictionary<string, PlayerAnimator.EWeaponAnimationType>();
         private static Player PlayerClient { get; set; } = null;
@@ -215,12 +215,8 @@ namespace RevivalMod.Features
 
                 _playerIsInvulnerable[playerId] = true;
 
-
-                // Apply tremor effect without healing
                 ApplyCriticalEffects(player);
 
-
-                // Make player invisible to AI - fixed implementation
                 ApplyRevivableStatePlayer(player);
 
                 if (player.IsYourPlayer)
@@ -292,16 +288,9 @@ namespace RevivalMod.Features
                 if (player.MovementContext != null)
                 {
                     // Force crouch
-                    player.MovementContext.SetPoseLevel(0);
+                    player.MovementContext.SetPoseLevel(0f, true);
                     player.ResetLookDirection();
-
-                    // Disable sprinting
-                    player.ActiveHealthController.AddFatigue();
                     player.ActiveHealthController.SetStaminaCoeff(0f);
-                    //// Force movement state to be limited
-                    //typeof(EFT.Player.MovementContext).GetMethod("AddStateSpeedLimit",
-                    //    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
-                    //    ?.Invoke(player.MovementContext, new object[] { "critical_state", 0.05f });
                 }
 
                 Plugin.LogSource.LogDebug($"Applied critical effects to player {playerId}");
@@ -326,6 +315,8 @@ namespace RevivalMod.Features
                     _originalMovementSpeed.Remove(playerId);
                 }
 
+                player.MovementContext.SetPoseLevel(1f);
+
                 Plugin.LogSource.LogDebug($"Restored movement for player {playerId}");
             }
             catch (Exception ex)
@@ -341,15 +332,15 @@ namespace RevivalMod.Features
             {
                 string playerId = player.ProfileId;
 
-                //// Skip if already applied
-                //if (_originalAwareness.ContainsKey(playerId))
-                //    return;
+                // Skip if already applied
+                if (_originalAwareness.ContainsKey(playerId))
+                    return;
 
-                //// Store original awareness value
-                //_originalAwareness[playerId] = player.Awareness;
+                // Store original awareness value
+                _originalAwareness[playerId] = player.Awareness;
 
-                //// Set awareness to 0 to make bots not detect the player
-                //player.Awareness = 0f;
+                // Set awareness to 0 to make bots not detect the player
+                player.Awareness = 0f;
                 player.PlayDeathSound();
                 player.HandsController.IsAiming = false;
                 player.MovementContext.EnableSprint(false);
@@ -373,10 +364,10 @@ namespace RevivalMod.Features
             try
             {
                 string playerId = player.ProfileId;
-                //if (!_originalAwareness.ContainsKey(playerId)) return;
+                if (!_originalAwareness.ContainsKey(playerId)) return;
 
-                //player.Awareness = _originalAwareness[playerId];
-                //_originalAwareness.Remove(playerId);
+                player.Awareness = _originalAwareness[playerId];
+                _originalAwareness.Remove(playerId);
 
                 player.IsVisible = true;
                 player.ActiveHealthController.IsAlive = true;
