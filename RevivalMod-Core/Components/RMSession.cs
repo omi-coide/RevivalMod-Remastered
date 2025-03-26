@@ -76,6 +76,8 @@ namespace RevivalMod.Components
                 return;
             }
 
+            if (Singleton<GameWorld>.Instance.MainPlayer.ProfileId == playerId) return;
+
             // Allow overwrites for updating item status
             Instance.CriticalPlayers[playerId] = position;
             Plugin.LogSource.LogInfo($"Player {playerId} added to critical players.");
@@ -84,6 +86,8 @@ namespace RevivalMod.Components
         public static void RemovePlayerFromCriticalPlayers(string playerId)
         {
             if (string.IsNullOrEmpty(playerId)) return;
+            if (Singleton<GameWorld>.Instance.MainPlayer.ProfileId == playerId) return;
+
             Instance.CriticalPlayers.Remove(playerId);
             Plugin.LogSource.LogInfo($"Player {playerId} removed from critical players.");
         }
@@ -91,6 +95,7 @@ namespace RevivalMod.Components
         public static Vector3 GetPosition(string playerId)
         {
             if (string.IsNullOrEmpty(playerId)) { return Vector3.zero; }
+            if (Singleton<GameWorld>.Instance.MainPlayer.ProfileId == playerId) return Vector3.zero;
             return Instance.CriticalPlayers[playerId];
         }
 

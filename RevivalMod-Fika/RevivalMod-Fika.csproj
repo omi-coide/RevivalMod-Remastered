@@ -35,8 +35,9 @@
     <RunPostBuildEvent>Always</RunPostBuildEvent>
   </PropertyGroup>
   <ItemGroup>
-    <Reference Include="Fika.Core">
-      <HintPath>..\Fika.Core.dll</HintPath>
+    <Reference Include="Fika.Core, Version=1.2.2.0, Culture=neutral, PublicKeyToken=1f37bed7e0de1980, processorArchitecture=MSIL">
+      <SpecificVersion>False</SpecificVersion>
+      <HintPath>..\..\Fika.Core.dll</HintPath>
     </Reference>
     <Reference Include="ItemComponent.Types, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null" />
     <Reference Include="PhysicsModule">

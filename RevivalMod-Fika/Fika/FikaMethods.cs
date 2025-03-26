@@ -69,6 +69,7 @@ namespace RevivalMod.FikaModule.Common
               
                 Singleton<FikaClient>.Instance.SendData(ref packet, DeliveryMethod.ReliableSequenced);
             }
+            
            
         }
 
@@ -132,31 +133,55 @@ namespace RevivalMod.FikaModule.Common
 
         private static void OnPlayerPositionPacketReceived(PlayerPositionPacket packet, NetPeer peer)
         {
-           
-            RMSession.AddToCriticalPlayers(packet.playerId, packet.position);
+            if (Singleton<FikaServer>.Instantiated && FikaBackendUtils.IsHeadless)
+            {
+                SendPlayerPositionPacket(packet.playerId, packet.timeOfDeath, packet.position);
+            }
+            else
+            {
+                RMSession.AddToCriticalPlayers(packet.playerId, packet.position);
+            }
         }
         private static void OnRemovePlayerFromCriticalPlayersListPacketReceived(RemovePlayerFromCriticalPlayersListPacket packet,  NetPeer peer)
         {
-            
-            RMSession.RemovePlayerFromCriticalPlayers(packet.playerId);
+            if (Singleton<FikaServer>.Instantiated && FikaBackendUtils.IsHeadless)
+            {
+                SendRemovePlayerFromCriticalPlayersListPacket(packet.playerId);
+            }
+            else
+            { 
+                RMSession.RemovePlayerFromCriticalPlayers(packet.playerId);
+            }
         }
         private static void OnReviveMePacketReceived(ReviveMePacket packet, NetPeer peer)
         {
-            bool revived = Features.RevivalFeatures.TryPerformRevivalByTeamMate(packet.reviveeId);
-            if (revived)
+            if (Singleton<FikaServer>.Instantiated && FikaBackendUtils.IsHeadless)
             {
-                SendRevivedPacket(packet.reviverId, peer);
+                SendReviveMePacket(packet.reviveeId, packet.reviverId);
+            }
+            else { 
+                bool revived = Features.RevivalFeatures.TryPerformRevivalByTeamMate(packet.reviveeId);
+                if (revived)
+                {
+                    SendRevivedPacket(packet.reviverId, peer);
+                }
             }
         }
 
         private static void OnRevivedPacketReceived(RevivedPacket packet, NetPeer peer)
-        { 
+        {
+            if (Singleton<FikaServer>.Instantiated && FikaBackendUtils.IsHeadless)
+            {
+                SendRevivedPacket(packet.reviverId, peer);
+            }
+            else { 
                 NotificationManagerClass.DisplayMessageNotification(
-                    $"Succesfully revived your teammate!",
-                    ENotificationDurationType.Long,
-                    ENotificationIconType.Friend,
-                    Color.green);
-            
+                        $"Succesfully revived your teammate!",
+                        ENotificationDurationType.Long,
+                        ENotificationIconType.Friend,
+                        Color.green);
+            }
+
         }
 
         public static void OnFikaNetManagerCreated(FikaNetworkManagerCreatedEvent managerCreatedEvent)

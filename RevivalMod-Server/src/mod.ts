@@ -44,10 +44,10 @@ class RevivalMod implements IPreSptLoadMod, IPostDBLoadMod, IPostSptLoadMod {
             this.addDefibrillatorToTrader();
             
             // Optional: Make the defibrillator more affordable
-            this.adjustDefibrillatorPrice();
+            // this.adjustDefibrillatorPrice();
 
             // Optional: Improve the defibrillator's properties
-            this.enhanceDefibrillatorProperties();
+            // this.enhanceDefibrillatorProperties();
 
             this.logger.info(`[${this.mod}] Setup complete in postDBLoad`);
         } catch (error) {
