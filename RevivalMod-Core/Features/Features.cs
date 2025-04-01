@@ -16,6 +16,7 @@ using RevivalMod.Helpers;
 using RevivalMod.Fika;
 using RevivalMod.Components;
 using EFT.UI;
+using EFT.UI.BattleTimer;
 
 namespace RevivalMod.Features
 {
@@ -77,6 +78,12 @@ namespace RevivalMod.Features
         public static readonly Dictionary<string, bool> KillOverridePlayers = new Dictionary<string, bool>();
 
         #endregion
+        public static CustomTimer criticalStateMainTimer;
+
+        private static CustomTimer selfRevivalTimer;
+        private static CustomTimer selfElapsedTimer;
+        private static CustomTimer criticalStateTimer;
+        private static CustomTimer elapsedTimer;
 
         #region Core Patch Implementation
 
@@ -176,9 +183,21 @@ namespace RevivalMod.Features
             criticalTimer -= Time.deltaTime;
             _playerCriticalStateTimers[playerId] = criticalTimer;
 
+            // Update the main critical state timer
+            if (criticalStateMainTimer != null)
+            {
+                criticalStateMainTimer.Update();
+            }
+
             // If time runs out, player dies
             if (criticalTimer <= 0)
             {
+                if (criticalStateMainTimer != null)
+                {
+                    criticalStateMainTimer.StopTimer();
+                    criticalStateMainTimer = null;
+                }
+
                 ForcePlayerDeath(player);
                 return;
             }
@@ -186,12 +205,18 @@ namespace RevivalMod.Features
             // Check for self-revival if player has the item
             CheckForSelfRevival(player, criticalTimer);
 
-            // Display countdown notifications
+            // Display countdown notifications - now less frequent since we have UI timer
             DisplayCriticalStateCountdown(criticalTimer);
 
             // Check for "give up" key press
             if (Input.GetKeyDown(Settings.GIVE_UP_KEY.Value))
             {
+                if (criticalStateMainTimer != null)
+                {
+                    criticalStateMainTimer.StopTimer();
+                    criticalStateMainTimer = null;
+                }
+
                 ForcePlayerDeath(player);
             }
         }
@@ -199,6 +224,8 @@ namespace RevivalMod.Features
         /// <summary>
         /// Checks if self-revival is possible and processes key input with hold-to-revive behavior
         /// </summary>
+        /// 
+
         private static void CheckForSelfRevival(Player player, float remainingTime)
         {
             var revivalItemCheck = CheckRevivalItemInRaidInventory();
@@ -211,40 +238,34 @@ namespace RevivalMod.Features
                 {
                     _selfRevivalKeyHoldDuration[revivalKey] = 0f;
 
-                    // Show initial notification
-                    NotificationManagerClass.DisplayMessageNotification(
-                        $"Hold {revivalKey} to use defibrillator... (0%)",
-                        ENotificationDurationType.Default,
-                        ENotificationIconType.Default,
-                        Color.yellow);
+                    // Initialize timers
+                    selfRevivalTimer = new CustomTimer();
+                    selfRevivalTimer.StartCountdown(Settings.REVIVAL_HOLD_DURATION.Value, "Self Revival Timer");
+
+                    selfElapsedTimer = new CustomTimer();
+                    selfElapsedTimer.StartStopwatch("Self Revival Elapsed");
                 }
 
                 // Update hold duration while key is held
                 if (Input.GetKey(revivalKey) && _selfRevivalKeyHoldDuration.ContainsKey(revivalKey))
                 {
+                    // Update timers
+                    if (selfRevivalTimer != null) selfRevivalTimer.Update();
+                    if (selfElapsedTimer != null) selfElapsedTimer.Update();
+
                     _selfRevivalKeyHoldDuration[revivalKey] += Time.deltaTime;
                     float holdDuration = _selfRevivalKeyHoldDuration[revivalKey];
-                    float requiredDuration = Settings.REVIVAL_HOLD_DURATION.Value;
-
-                    // Show progress notifications
-                    _progressNotificationTimer -= Time.deltaTime;
-                    if (_progressNotificationTimer <= 0)
-                    {
-                        _progressNotificationTimer = PROGRESS_NOTIFICATION_INTERVAL;
-                        int progressPercent = Mathf.RoundToInt((holdDuration / requiredDuration) * 100f);
-                        progressPercent = Mathf.Clamp(progressPercent, 0, 100);
-
-                        NotificationManagerClass.DisplayMessageNotification(
-                            $"Hold {revivalKey} to use defibrillator... ({progressPercent}%)",
-                            ENotificationDurationType.Default,
-                            ENotificationIconType.Default,
-                            Color.yellow);
-                    }
+                    float requiredDuration = Settings.REVIVAL_HOLD_DURATION.Value;           
 
                     // Trigger revival when key is held long enough
                     if (holdDuration >= requiredDuration)
                     {
                         _selfRevivalKeyHoldDuration.Remove(revivalKey);
+
+                        // Stop timers
+                        if (selfRevivalTimer != null) selfRevivalTimer.StopTimer();
+                        if (selfElapsedTimer != null) selfElapsedTimer.StopTimer();
+
                         TryPerformManualRevival(player);
                     }
                 }
@@ -254,6 +275,10 @@ namespace RevivalMod.Features
                 {
                     if (_selfRevivalKeyHoldDuration.ContainsKey(revivalKey))
                     {
+                        // Stop timers
+                        if (selfRevivalTimer != null) selfRevivalTimer.StopTimer();
+                        if (selfElapsedTimer != null) selfElapsedTimer.StopTimer();
+
                         NotificationManagerClass.DisplayMessageNotification(
                             "Defibrillator use canceled",
                             ENotificationDurationType.Default,
@@ -271,6 +296,7 @@ namespace RevivalMod.Features
         /// </summary>
         private static void DisplayCriticalStateCountdown(float criticalTimer)
         {
+            return;
             // Regular interval notifications
             if (criticalTimer % CRITICAL_NOTIFICATION_INTERVAL < 0.1f && criticalTimer > 0.5f)
             {
@@ -294,6 +320,7 @@ namespace RevivalMod.Features
         /// <summary>
         /// Checks for nearby critical teammates and processes revival actions with hold-to-revive behavior
         /// </summary>
+
         private static void CheckForTeammateRevival(Player player)
         {
             var revivalItemCheck = CheckRevivalItemInRaidInventory();
@@ -332,18 +359,24 @@ namespace RevivalMod.Features
                         _teamRevivalKeyHoldDuration[teamRevivalKey] = 0f;
                         _currentRevivalTargets[playerId] = critPlayer.Key;
 
-                        // Show initial notification
-                        NotificationManagerClass.DisplayMessageNotification(
-                            $"Hold {teamRevivalKey} to revive teammate... (0%)",
-                            ENotificationDurationType.Default,
-                            ENotificationIconType.Friend,
-                            Color.green);
+                        // Initialize timers
+                        criticalStateTimer = new CustomTimer();
+                        criticalStateTimer.StartCountdown(Settings.TEAM_REVIVAL_HOLD_DURATION.Value, "Reviving Teammate");
+                        
+                        elapsedTimer = new CustomTimer();
+                        elapsedTimer.StartStopwatch("Revival Elapsed Time");
+
+                       
                     }
 
                     // Update hold duration while key is held
                     if (Input.GetKey(teamRevivalKey) && _teamRevivalKeyHoldDuration.ContainsKey(teamRevivalKey) &&
                         _currentRevivalTargets.ContainsKey(playerId) && _currentRevivalTargets[playerId] == critPlayer.Key)
                     {
+                        // Update both timers
+                        criticalStateTimer.Update();
+                        elapsedTimer.Update();
+
                         _teamRevivalKeyHoldDuration[teamRevivalKey] += Time.deltaTime;
                         float holdDuration = _teamRevivalKeyHoldDuration[teamRevivalKey];
                         float requiredDuration = Settings.TEAM_REVIVAL_HOLD_DURATION.Value;
@@ -356,11 +389,7 @@ namespace RevivalMod.Features
                             int progressPercent = Mathf.RoundToInt((holdDuration / requiredDuration) * 100f);
                             progressPercent = Mathf.Clamp(progressPercent, 0, 100);
 
-                            NotificationManagerClass.DisplayMessageNotification(
-                                $"Hold {teamRevivalKey} to revive teammate... ({progressPercent}%)",
-                                ENotificationDurationType.Default,
-                                ENotificationIconType.Friend,
-                                Color.green);
+                           
                         }
 
                         // Trigger revival when key is held long enough
@@ -369,6 +398,11 @@ namespace RevivalMod.Features
                             string targetId = _currentRevivalTargets[playerId];
                             _teamRevivalKeyHoldDuration.Remove(teamRevivalKey);
                             _currentRevivalTargets.Remove(playerId);
+
+                            // Stop timers
+                            criticalStateTimer.StopTimer();
+                            elapsedTimer.StopTimer();
+
                             PerformTeammateRevival(targetId, player);
                         }
                     }
@@ -378,6 +412,10 @@ namespace RevivalMod.Features
                     {
                         if (_teamRevivalKeyHoldDuration.ContainsKey(teamRevivalKey))
                         {
+                            // Stop timers
+                            if (criticalStateTimer != null) criticalStateTimer.StopTimer();
+                            if (elapsedTimer != null) elapsedTimer.StopTimer();
+
                             NotificationManagerClass.DisplayMessageNotification(
                                 "Revival canceled",
                                 ENotificationDurationType.Default,
@@ -466,6 +504,8 @@ namespace RevivalMod.Features
                     ENotificationDurationType.Long,
                     ENotificationIconType.Default,
                     Color.green);
+                criticalStateMainTimer.StopTimer();
+                criticalStateMainTimer = null;
 
                 Plugin.LogSource.LogInfo($"Team revival performed for player {playerId}");
                 return true;
@@ -523,6 +563,7 @@ namespace RevivalMod.Features
         /// <summary>
         /// Initializes critical state for a player
         /// </summary>
+
         private static void InitializeCriticalState(Player player, string playerId)
         {
             // Set the critical state timer
@@ -537,11 +578,16 @@ namespace RevivalMod.Features
             if (player.IsYourPlayer)
             {
                 DisplayCriticalStateNotification(player);
+
+                // Create a countdown timer for critical state
+                criticalStateMainTimer = new CustomTimer();
+                criticalStateMainTimer.StartCountdown(Settings.TIME_TO_REVIVE.Value, "Critical State Timer");
             }
 
             // Send initial position packet for multiplayer sync
             FikaBridge.SendPlayerPositionPacket(playerId, new DateTime(), player.Position);
         }
+
 
         /// <summary>
         /// Displays critical state notification with available options
@@ -580,6 +626,13 @@ namespace RevivalMod.Features
         {
             // Remove from critical state timer tracking
             _playerCriticalStateTimers.Remove(playerId);
+
+            // Stop the main critical state timer
+            if (criticalStateMainTimer != null)
+            {
+                criticalStateMainTimer.StopTimer();
+                criticalStateMainTimer = null;
+            }
 
             // If player is leaving critical state without revival, clean up
             if (!_playerInvulnerabilityTimers.ContainsKey(playerId))
@@ -1155,7 +1208,7 @@ namespace RevivalMod.Features
                 // Remove player from critical players list for network sync
                 RMSession.RemovePlayerFromCriticalPlayers(playerId);
                 FikaBridge.SendRemovePlayerFromCriticalPlayersListPacket(playerId);
-
+                criticalStateMainTimer.StopTimer();
                 // Show notification about death
                 NotificationManagerClass.DisplayMessageNotification(
                     "You have died",

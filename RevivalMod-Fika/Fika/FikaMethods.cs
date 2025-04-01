@@ -9,6 +9,7 @@ using Fika.Core.Modding.Events;
 using Fika.Core.Networking;
 using LiteNetLib;
 using RevivalMod.Components;
+using RevivalMod.Features;
 using RevivalMod.FikaModule.Packets;
 using System;
 using UnityEngine;
