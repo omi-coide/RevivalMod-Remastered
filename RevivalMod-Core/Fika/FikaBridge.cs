@@ -58,7 +58,7 @@ namespace RevivalMod.Fika
         public static event SendPlayerPositionPacketEvent SendPlayerPositionPacketEmitted;
         public static void SendPlayerPositionPacket(string playerId, DateTime timeOfDeath, Vector3 position)
         { 
-            Plugin.LogSource.LogInfo("Sending player position packet");
+            Plugin.LogSource.LogDebug("Sending player position packet");
             SendPlayerPositionPacketEmitted?.Invoke(playerId, timeOfDeath, position); 
         }
 
@@ -66,7 +66,7 @@ namespace RevivalMod.Fika
         public static event SendRemovePlayerFromCriticalPlayersListPacketEvent SendRemovePlayerFromCriticalPlayersListPacketEmitted;
         public static void SendRemovePlayerFromCriticalPlayersListPacket(string playerId)
         {
-            Plugin.LogSource.LogInfo("Sending remove player from critical players list packet");
+            Plugin.LogSource.LogDebug("Sending remove player from critical players list packet");
             SendRemovePlayerFromCriticalPlayersListPacketEmitted?.Invoke(playerId); 
         }
 
@@ -74,7 +74,7 @@ namespace RevivalMod.Fika
         public static event SendReviveMePacketEvent SendReviveMePacketEmitted;
         public static void SendReviveMePacket(string reviveeId, string reviverId)
         {
-            Plugin.LogSource.LogInfo("Sending revive me packet");
+            Plugin.LogSource.LogDebug("Sending revive me packet");
             SendReviveMePacketEmitted?.Invoke(reviveeId, reviverId); 
         }
 
