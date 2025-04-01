@@ -1,6 +1,7 @@
 ﻿using Comfort.Common;
 using EFT;
 using EFT.Communications;
+using Fika.Core.Coop.Custom;
 using Fika.Core.Coop.HostClasses;
 using Fika.Core.Coop.Utils;
 using Fika.Core.Modding;
@@ -140,6 +141,10 @@ namespace RevivalMod.FikaModule.Common
             else
             {
                 RMSession.AddToCriticalPlayers(packet.playerId, packet.position);
+                //FikaHealthBar fikaHealthBar = Singleton<FikaHealthBar>.Instance;
+                //PlayerPlateUI playerPlateUI = Singleton<PlayerPlateUI>.Instance;
+                
+                //playerPlateUI.SetNameText("Revive your teammate if you can!");
             }
         }
         private static void OnRemovePlayerFromCriticalPlayersListPacketReceived(RemovePlayerFromCriticalPlayersListPacket packet,  NetPeer peer)

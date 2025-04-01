@@ -45,5 +45,10 @@ namespace RevivalMod.Helpers
             return player;
         }
 
+        public static List<Player> GetAllPlayersAndBots()
+        {
+            return Singleton<GameWorld>.Instance.AllAlivePlayersList;
+        }
+
     }
 }
