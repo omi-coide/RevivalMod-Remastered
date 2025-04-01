@@ -7,6 +7,22 @@ using TMPro;
 namespace RevivalMod.Helpers
 {
     /// <summary>
+    /// Positions for the custom timer UI
+    /// </summary>
+    public enum TimerPosition
+    {
+        TopLeft,
+        TopCenter,
+        TopRight,
+        MiddleLeft,
+        MiddleCenter,
+        MiddleRight,
+        BottomLeft,
+        BottomCenter,
+        BottomRight
+    }
+
+    /// <summary>
     /// Custom timer implementation with a fully custom UI
     /// </summary>
     public class CustomTimer
@@ -17,6 +33,7 @@ namespace RevivalMod.Helpers
         private bool isCountdown;
         private bool isRunning;
         private string timerName;
+        private TimerPosition timerPosition;
 
         // UI components
         private GameObject timerObject;
@@ -30,11 +47,12 @@ namespace RevivalMod.Helpers
         /// <summary>
         /// Start a countdown timer with specified duration
         /// </summary>
-        public void StartCountdown(float durationInSeconds, string name = "Countdown")
+        public void StartCountdown(float durationInSeconds, string name = "Countdown", TimerPosition position = TimerPosition.BottomCenter)
         {
             isCountdown = true;
             isRunning = true;
             timerName = name;
+            timerPosition = position;
 
             // Set target time
             startTime = DateTime.UtcNow;
@@ -47,11 +65,12 @@ namespace RevivalMod.Helpers
         /// <summary>
         /// Start a stopwatch to measure elapsed time
         /// </summary>
-        public void StartStopwatch(string name = "Stopwatch")
+        public void StartStopwatch(string name = "Stopwatch", TimerPosition position = TimerPosition.TopCenter)
         {
             isCountdown = false;
             isRunning = true;
             timerName = name;
+            timerPosition = position;
 
             // Set start time
             startTime = DateTime.UtcNow;
@@ -151,24 +170,10 @@ namespace RevivalMod.Helpers
                 // Add RectTransform (required for UI elements)
                 RectTransform rectTransform = timerObject.AddComponent<RectTransform>();
 
-                // Set position and size
-                if (isCountdown)
-                {
-                    // Bottom center for countdown
-                    rectTransform.anchorMin = new Vector2(0.5f, 0);
-                    rectTransform.anchorMax = new Vector2(0.5f, 0);
-                    rectTransform.pivot = new Vector2(0.5f, 0);
-                    rectTransform.anchoredPosition = new Vector2(0, 80);
-                }
-                else
-                {
-                    // Top center for stopwatch
-                    rectTransform.anchorMin = new Vector2(0.5f, 1);
-                    rectTransform.anchorMax = new Vector2(0.5f, 1);
-                    rectTransform.pivot = new Vector2(0.5f, 1);
-                    rectTransform.anchoredPosition = new Vector2(0, -50);
-                }
+                // Set position based on the specified timer position
+                ApplyTimerPosition(rectTransform);
 
+                // Set size
                 rectTransform.sizeDelta = new Vector2(200, 60);
 
                 // Add a background image
@@ -219,11 +224,84 @@ namespace RevivalMod.Helpers
                 // Make sure the object is active
                 timerObject.SetActive(true);
 
-                Plugin.LogSource.LogInfo($"Created custom timer UI for {timerName}");
+                Plugin.LogSource.LogDebug($"Created custom timer UI for {timerName} at position {timerPosition}");
             }
             catch (Exception ex)
             {
                 Plugin.LogSource.LogError($"Error creating custom timer UI: {ex.Message}\n{ex.StackTrace}");
+            }
+        }
+
+        /// <summary>
+        /// Apply positioning to the timer based on the selected position enum
+        /// </summary>
+        private void ApplyTimerPosition(RectTransform rectTransform)
+        {
+            // Set anchors and position based on the selected position
+            switch (timerPosition)
+            {
+                case TimerPosition.TopLeft:
+                    rectTransform.anchorMin = new Vector2(0, 1);
+                    rectTransform.anchorMax = new Vector2(0, 1);
+                    rectTransform.pivot = new Vector2(0, 1);
+                    rectTransform.anchoredPosition = new Vector2(20, -20);
+                    break;
+
+                case TimerPosition.TopCenter:
+                    rectTransform.anchorMin = new Vector2(0.5f, 1);
+                    rectTransform.anchorMax = new Vector2(0.5f, 1);
+                    rectTransform.pivot = new Vector2(0.5f, 1);
+                    rectTransform.anchoredPosition = new Vector2(0, -20);
+                    break;
+
+                case TimerPosition.TopRight:
+                    rectTransform.anchorMin = new Vector2(1, 1);
+                    rectTransform.anchorMax = new Vector2(1, 1);
+                    rectTransform.pivot = new Vector2(1, 1);
+                    rectTransform.anchoredPosition = new Vector2(-20, -20);
+                    break;
+
+                case TimerPosition.MiddleLeft:
+                    rectTransform.anchorMin = new Vector2(0, 0.5f);
+                    rectTransform.anchorMax = new Vector2(0, 0.5f);
+                    rectTransform.pivot = new Vector2(0, 0.5f);
+                    rectTransform.anchoredPosition = new Vector2(20, 0);
+                    break;
+
+                case TimerPosition.MiddleCenter:
+                    rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
+                    rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
+                    rectTransform.pivot = new Vector2(0.5f, 0.5f);
+                    rectTransform.anchoredPosition = new Vector2(0, 0);
+                    break;
+
+                case TimerPosition.MiddleRight:
+                    rectTransform.anchorMin = new Vector2(1, 0.5f);
+                    rectTransform.anchorMax = new Vector2(1, 0.5f);
+                    rectTransform.pivot = new Vector2(1, 0.5f);
+                    rectTransform.anchoredPosition = new Vector2(-20, 0);
+                    break;
+
+                case TimerPosition.BottomLeft:
+                    rectTransform.anchorMin = new Vector2(0, 0);
+                    rectTransform.anchorMax = new Vector2(0, 0);
+                    rectTransform.pivot = new Vector2(0, 0);
+                    rectTransform.anchoredPosition = new Vector2(20, 20);
+                    break;
+
+                case TimerPosition.BottomCenter:
+                    rectTransform.anchorMin = new Vector2(0.5f, 0);
+                    rectTransform.anchorMax = new Vector2(0.5f, 0);
+                    rectTransform.pivot = new Vector2(0.5f, 0);
+                    rectTransform.anchoredPosition = new Vector2(0, 80);
+                    break;
+
+                case TimerPosition.BottomRight:
+                    rectTransform.anchorMin = new Vector2(1, 0);
+                    rectTransform.anchorMax = new Vector2(1, 0);
+                    rectTransform.pivot = new Vector2(1, 0);
+                    rectTransform.anchoredPosition = new Vector2(-20, 20);
+                    break;
             }
         }
 

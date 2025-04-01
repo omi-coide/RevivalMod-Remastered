@@ -81,9 +81,7 @@ namespace RevivalMod.Features
         public static CustomTimer criticalStateMainTimer;
 
         private static CustomTimer selfRevivalTimer;
-        private static CustomTimer selfElapsedTimer;
         private static CustomTimer criticalStateTimer;
-        private static CustomTimer elapsedTimer;
 
         #region Core Patch Implementation
 
@@ -242,16 +240,11 @@ namespace RevivalMod.Features
                     selfRevivalTimer = new CustomTimer();
                     selfRevivalTimer.StartCountdown(Settings.REVIVAL_HOLD_DURATION.Value, "Self Revival Timer");
 
-                    selfElapsedTimer = new CustomTimer();
-                    selfElapsedTimer.StartStopwatch("Self Revival Elapsed");
                 }
 
                 // Update hold duration while key is held
                 if (Input.GetKey(revivalKey) && _selfRevivalKeyHoldDuration.ContainsKey(revivalKey))
                 {
-                    // Update timers
-                    if (selfRevivalTimer != null) selfRevivalTimer.Update();
-                    if (selfElapsedTimer != null) selfElapsedTimer.Update();
 
                     _selfRevivalKeyHoldDuration[revivalKey] += Time.deltaTime;
                     float holdDuration = _selfRevivalKeyHoldDuration[revivalKey];
@@ -264,7 +257,6 @@ namespace RevivalMod.Features
 
                         // Stop timers
                         if (selfRevivalTimer != null) selfRevivalTimer.StopTimer();
-                        if (selfElapsedTimer != null) selfElapsedTimer.StopTimer();
 
                         TryPerformManualRevival(player);
                     }
@@ -277,7 +269,6 @@ namespace RevivalMod.Features
                     {
                         // Stop timers
                         if (selfRevivalTimer != null) selfRevivalTimer.StopTimer();
-                        if (selfElapsedTimer != null) selfElapsedTimer.StopTimer();
 
                         NotificationManagerClass.DisplayMessageNotification(
                             "Defibrillator use canceled",
@@ -362,11 +353,6 @@ namespace RevivalMod.Features
                         // Initialize timers
                         criticalStateTimer = new CustomTimer();
                         criticalStateTimer.StartCountdown(Settings.TEAM_REVIVAL_HOLD_DURATION.Value, "Reviving Teammate");
-                        
-                        elapsedTimer = new CustomTimer();
-                        elapsedTimer.StartStopwatch("Revival Elapsed Time");
-
-                       
                     }
 
                     // Update hold duration while key is held
@@ -375,7 +361,6 @@ namespace RevivalMod.Features
                     {
                         // Update both timers
                         criticalStateTimer.Update();
-                        elapsedTimer.Update();
 
                         _teamRevivalKeyHoldDuration[teamRevivalKey] += Time.deltaTime;
                         float holdDuration = _teamRevivalKeyHoldDuration[teamRevivalKey];
@@ -401,7 +386,6 @@ namespace RevivalMod.Features
 
                             // Stop timers
                             criticalStateTimer.StopTimer();
-                            elapsedTimer.StopTimer();
 
                             PerformTeammateRevival(targetId, player);
                         }
@@ -414,7 +398,6 @@ namespace RevivalMod.Features
                         {
                             // Stop timers
                             if (criticalStateTimer != null) criticalStateTimer.StopTimer();
-                            if (elapsedTimer != null) elapsedTimer.StopTimer();
 
                             NotificationManagerClass.DisplayMessageNotification(
                                 "Revival canceled",
@@ -581,7 +564,7 @@ namespace RevivalMod.Features
 
                 // Create a countdown timer for critical state
                 criticalStateMainTimer = new CustomTimer();
-                criticalStateMainTimer.StartCountdown(Settings.TIME_TO_REVIVE.Value, "Critical State Timer");
+                criticalStateMainTimer.StartCountdown(Settings.TIME_TO_REVIVE.Value, "Critical State Timer", TimerPosition.MiddleCenter);
             }
 
             // Send initial position packet for multiplayer sync
@@ -733,6 +716,8 @@ namespace RevivalMod.Features
             // Set last revival time
             _lastRevivalTimesByPlayer[playerId] = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
 
+            criticalStateMainTimer.StopTimer();
+            criticalStateMainTimer = null;
             // Show successful revival notification
             NotificationManagerClass.DisplayMessageNotification(
                 "Defibrillator used successfully! You are temporarily invulnerable but limited in movement.",
