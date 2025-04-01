@@ -41,7 +41,6 @@ namespace RevivalMod
             new GameStartedPatch().Enable();
 
             LogSource.LogInfo("Revival plugin initialized! Press F5 to use your defibrillator when in critical state.");
-          
             TryInitFikaAssembly();
         }
 
@@ -67,5 +66,7 @@ namespace RevivalMod
                 LogSource.LogError($"Error loading Fika assembly: {ex.Message}");
             }
         }
+
+  
     }
 }

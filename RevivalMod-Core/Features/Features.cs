@@ -37,6 +37,7 @@ namespace RevivalMod.Features
         private const float CRITICAL_NOTIFICATION_INTERVAL = 30f;
         private const float URGENT_NOTIFICATION_INTERVAL = 10f;
         private const float CRITICAL_URGENT_THRESHOLD = 30f;
+        private const float PROGRESS_NOTIFICATION_INTERVAL = 0.25f;
 
         // Visual effect constants
         private const float FLASH_INTERVAL = 0.5f;
@@ -47,6 +48,12 @@ namespace RevivalMod.Features
 
         // Timers and state for notifications
         private static float _notificationTimer = 0f;
+        private static float _progressNotificationTimer = 0f;
+
+        // Key holding tracking
+        private static readonly Dictionary<KeyCode, float> _selfRevivalKeyHoldDuration = new Dictionary<KeyCode, float>();
+        private static readonly Dictionary<KeyCode, float> _teamRevivalKeyHoldDuration = new Dictionary<KeyCode, float>();
+        private static readonly Dictionary<string, string> _currentRevivalTargets = new Dictionary<string, string>();
 
         // Player state dictionaries
         private static readonly Dictionary<string, long> _lastRevivalTimesByPlayer = new Dictionary<string, long>();
@@ -95,6 +102,13 @@ namespace RevivalMod.Features
                 ProcessInvulnerabilityState(__instance, playerId);
                 ProcessCriticalState(__instance, playerId);
                 CheckForTeammateRevival(__instance);
+
+                // Send position updates if in critical state (regardless of local player status)
+                if (IsPlayerInCriticalState(playerId))
+                {
+                    // Send position update on every tick for critical players
+                    FikaBridge.SendPlayerPositionPacket(playerId, new DateTime(), __instance.Position);
+                }
             }
             catch (Exception ex)
             {
@@ -183,16 +197,71 @@ namespace RevivalMod.Features
         }
 
         /// <summary>
-        /// Checks if self-revival is possible and processes key input
+        /// Checks if self-revival is possible and processes key input with hold-to-revive behavior
         /// </summary>
         private static void CheckForSelfRevival(Player player, float remainingTime)
         {
             var revivalItemCheck = CheckRevivalItemInRaidInventory();
             if (revivalItemCheck.Value && Settings.SELF_REVIVAL_ENABLED.Value)
             {
-                if (Input.GetKeyDown(Settings.SELF_REVIVAL_KEY.Value))
+                KeyCode revivalKey = Settings.SELF_REVIVAL_KEY.Value;
+
+                // Start key hold tracking when key is first pressed
+                if (Input.GetKeyDown(revivalKey))
                 {
-                    TryPerformManualRevival(player);
+                    _selfRevivalKeyHoldDuration[revivalKey] = 0f;
+
+                    // Show initial notification
+                    NotificationManagerClass.DisplayMessageNotification(
+                        $"Hold {revivalKey} to use defibrillator... (0%)",
+                        ENotificationDurationType.Default,
+                        ENotificationIconType.Default,
+                        Color.yellow);
+                }
+
+                // Update hold duration while key is held
+                if (Input.GetKey(revivalKey) && _selfRevivalKeyHoldDuration.ContainsKey(revivalKey))
+                {
+                    _selfRevivalKeyHoldDuration[revivalKey] += Time.deltaTime;
+                    float holdDuration = _selfRevivalKeyHoldDuration[revivalKey];
+                    float requiredDuration = Settings.REVIVAL_HOLD_DURATION.Value;
+
+                    // Show progress notifications
+                    _progressNotificationTimer -= Time.deltaTime;
+                    if (_progressNotificationTimer <= 0)
+                    {
+                        _progressNotificationTimer = PROGRESS_NOTIFICATION_INTERVAL;
+                        int progressPercent = Mathf.RoundToInt((holdDuration / requiredDuration) * 100f);
+                        progressPercent = Mathf.Clamp(progressPercent, 0, 100);
+
+                        NotificationManagerClass.DisplayMessageNotification(
+                            $"Hold {revivalKey} to use defibrillator... ({progressPercent}%)",
+                            ENotificationDurationType.Default,
+                            ENotificationIconType.Default,
+                            Color.yellow);
+                    }
+
+                    // Trigger revival when key is held long enough
+                    if (holdDuration >= requiredDuration)
+                    {
+                        _selfRevivalKeyHoldDuration.Remove(revivalKey);
+                        TryPerformManualRevival(player);
+                    }
+                }
+
+                // Reset when key is released
+                if (Input.GetKeyUp(revivalKey))
+                {
+                    if (_selfRevivalKeyHoldDuration.ContainsKey(revivalKey))
+                    {
+                        NotificationManagerClass.DisplayMessageNotification(
+                            "Defibrillator use canceled",
+                            ENotificationDurationType.Default,
+                            ENotificationIconType.Default,
+                            Color.red);
+
+                        _selfRevivalKeyHoldDuration.Remove(revivalKey);
+                    }
                 }
             }
         }
@@ -223,7 +292,7 @@ namespace RevivalMod.Features
         }
 
         /// <summary>
-        /// Checks for nearby critical teammates and processes revival actions
+        /// Checks for nearby critical teammates and processes revival actions with hold-to-revive behavior
         /// </summary>
         private static void CheckForTeammateRevival(Player player)
         {
@@ -231,28 +300,93 @@ namespace RevivalMod.Features
             if (!revivalItemCheck.Value)
                 return;
 
+            // Get player position
+            string playerId = player.ProfileId;
             Vector3 currentPos = player.Position;
+
+            // Process each critical player
             foreach (KeyValuePair<string, Vector3> critPlayer in RMSession.GetCriticalPlayers())
             {
                 // Using squared magnitude for performance (avoids square root calculation)
                 if ((currentPos - critPlayer.Value).sqrMagnitude <= 4f &&
                     (!_revivablePlayers.ContainsKey(critPlayer.Key) || !_revivablePlayers[critPlayer.Key]))
                 {
+                    // Show notification about nearby critical player
                     _notificationTimer -= Time.deltaTime;
                     if (_notificationTimer <= 0)
                     {
                         _notificationTimer = NOTIFICATION_INTERVAL;
                         NotificationManagerClass.DisplayMessageNotification(
-                            $"Press {Settings.TEAM_REVIVAL_KEY.Value} to use your defibrillator to revive your teammate!",
+                            $"Press and hold {Settings.TEAM_REVIVAL_KEY.Value} to use your defibrillator to revive your teammate!",
                             ENotificationDurationType.Long,
                             ENotificationIconType.Friend,
                             Color.green);
                         Plugin.LogSource.LogDebug($"Player with id {player.ProfileId} is within 2m of critplayer with id {critPlayer.Key}");
                     }
 
-                    if (Input.GetKeyDown(Settings.TEAM_REVIVAL_KEY.Value))
+                    KeyCode teamRevivalKey = Settings.TEAM_REVIVAL_KEY.Value;
+
+                    // Start key hold tracking when key is first pressed
+                    if (Input.GetKeyDown(teamRevivalKey))
                     {
-                        PerformTeammateRevival(critPlayer.Key, player);
+                        _teamRevivalKeyHoldDuration[teamRevivalKey] = 0f;
+                        _currentRevivalTargets[playerId] = critPlayer.Key;
+
+                        // Show initial notification
+                        NotificationManagerClass.DisplayMessageNotification(
+                            $"Hold {teamRevivalKey} to revive teammate... (0%)",
+                            ENotificationDurationType.Default,
+                            ENotificationIconType.Friend,
+                            Color.green);
+                    }
+
+                    // Update hold duration while key is held
+                    if (Input.GetKey(teamRevivalKey) && _teamRevivalKeyHoldDuration.ContainsKey(teamRevivalKey) &&
+                        _currentRevivalTargets.ContainsKey(playerId) && _currentRevivalTargets[playerId] == critPlayer.Key)
+                    {
+                        _teamRevivalKeyHoldDuration[teamRevivalKey] += Time.deltaTime;
+                        float holdDuration = _teamRevivalKeyHoldDuration[teamRevivalKey];
+                        float requiredDuration = Settings.TEAM_REVIVAL_HOLD_DURATION.Value;
+
+                        // Show progress notifications
+                        _progressNotificationTimer -= Time.deltaTime;
+                        if (_progressNotificationTimer <= 0)
+                        {
+                            _progressNotificationTimer = PROGRESS_NOTIFICATION_INTERVAL;
+                            int progressPercent = Mathf.RoundToInt((holdDuration / requiredDuration) * 100f);
+                            progressPercent = Mathf.Clamp(progressPercent, 0, 100);
+
+                            NotificationManagerClass.DisplayMessageNotification(
+                                $"Hold {teamRevivalKey} to revive teammate... ({progressPercent}%)",
+                                ENotificationDurationType.Default,
+                                ENotificationIconType.Friend,
+                                Color.green);
+                        }
+
+                        // Trigger revival when key is held long enough
+                        if (holdDuration >= requiredDuration)
+                        {
+                            string targetId = _currentRevivalTargets[playerId];
+                            _teamRevivalKeyHoldDuration.Remove(teamRevivalKey);
+                            _currentRevivalTargets.Remove(playerId);
+                            PerformTeammateRevival(targetId, player);
+                        }
+                    }
+
+                    // Reset when key is released
+                    if (Input.GetKeyUp(teamRevivalKey))
+                    {
+                        if (_teamRevivalKeyHoldDuration.ContainsKey(teamRevivalKey))
+                        {
+                            NotificationManagerClass.DisplayMessageNotification(
+                                "Revival canceled",
+                                ENotificationDurationType.Default,
+                                ENotificationIconType.Friend,
+                                Color.red);
+
+                            _teamRevivalKeyHoldDuration.Remove(teamRevivalKey);
+                            _currentRevivalTargets.Remove(playerId);
+                        }
                     }
                 }
             }
@@ -404,6 +538,9 @@ namespace RevivalMod.Features
             {
                 DisplayCriticalStateNotification(player);
             }
+
+            // Send initial position packet for multiplayer sync
+            FikaBridge.SendPlayerPositionPacket(playerId, new DateTime(), player.Position);
         }
 
         /// <summary>
@@ -418,7 +555,7 @@ namespace RevivalMod.Features
 
                 if (Settings.SELF_REVIVAL_ENABLED.Value && CheckRevivalItemInRaidInventory().Value)
                 {
-                    message += $"Press {Settings.SELF_REVIVAL_KEY.Value} to use defibrillator\n";
+                    message += $"Hold {Settings.SELF_REVIVAL_KEY.Value} for {Settings.REVIVAL_HOLD_DURATION.Value}s to use defibrillator\n";
                 }
 
                 message += $"Press {Settings.GIVE_UP_KEY.Value} to give up\n";
@@ -562,7 +699,7 @@ namespace RevivalMod.Features
             try
             {
                 NotificationManagerClass.DisplayMessageNotification(
-                   "Attempting to revive teammate...",
+                   "Reviving teammate...",
                    ENotificationDurationType.Default,
                    ENotificationIconType.Friend,
                    Color.green);
@@ -725,7 +862,7 @@ namespace RevivalMod.Features
                         goto IL_12F;
                     }
                 }
-                IL_12F:
+            IL_12F:
                 player.MovementContext.ReleaseDoorIfInteractingWithOne();
                 player.MovementContext.OnStateChanged -= player.method_17;
                 player.MovementContext.PhysicalConditionChanged -= player.ProceduralWeaponAnimation.PhysicalConditionUpdated;
@@ -741,32 +878,39 @@ namespace RevivalMod.Features
                     player.ReleaseHand();
                     return;
                 }
-                
 
-                PropertyInfo corpseProperty = typeof(Player).GetProperty("Corpse",
-                    BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
-
-                // Get the protected CreateCorpse method
-                MethodInfo createCorpseMethod = typeof(Player).GetMethod("CreateCorpse",
-                    BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
-
-                if (corpseProperty != null && createCorpseMethod != null)
+                // Use reflection to access protected members to create and assign a corpse
+                try
                 {
-                    // Invoke the CreateCorpse method on the player instance
-                    object corpse = createCorpseMethod.Invoke(player, null);
+                    // Get the protected Corpse property
+                    PropertyInfo corpseProperty = typeof(Player).GetProperty("Corpse",
+                        BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
 
-                    // Set the Corpse property with the new corpse
-                    corpseProperty.SetValue(player, corpse);
+                    // Get the protected CreateCorpse method
+                    MethodInfo createCorpseMethod = typeof(Player).GetMethod("CreateCorpse",
+                        BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
 
-                    Plugin.LogSource.LogDebug($"Created and assigned corpse for player {playerId}");
+                    if (corpseProperty != null && createCorpseMethod != null)
+                    {
+                        // Invoke the CreateCorpse method on the player instance
+                        object corpse = createCorpseMethod.Invoke(player, null);
+
+                        // Set the Corpse property with the new corpse
+                        corpseProperty.SetValue(player, corpse);
+
+                        Plugin.LogSource.LogDebug($"Created and assigned corpse for player {playerId}");
+                    }
+                    else
+                    {
+                        Plugin.LogSource.LogWarning("Could not find Corpse property or CreateCorpse method via reflection");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Plugin.LogSource.LogError($"Error creating corpse: {ex.Message}");
                 }
 
-                else
-                {
-                    Plugin.LogSource.LogWarning("Could not find Corpse property or CreateCorpse method via reflection");
-                }
-
-                // Synchronize state for multiplayer
+                // Send initial position for multiplayer sync
                 FikaBridge.SendPlayerPositionPacket(playerId, new DateTime(), player.Position);
 
                 Plugin.LogSource.LogDebug($"Applied revivable state to player {playerId}");
@@ -1025,8 +1169,7 @@ namespace RevivalMod.Features
 
                 // Use original Kill method, bypassing our patch
                 player.ActiveHealthController.IsAlive = true;
-                player.ActiveHealthController.Kill(damageType);
-
+                player.ActiveHealthController.Kill(damageType);               
                 Plugin.LogSource.LogInfo($"Player {playerId} has died after critical state");
             }
             catch (Exception ex)

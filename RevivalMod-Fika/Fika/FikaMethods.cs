@@ -107,7 +107,7 @@ namespace RevivalMod.FikaModule.Common
         }
         public static void SendRevivedPacket(string reviverId, NetPeer peer)
         {
-            ReviveMePacket packet = new ReviveMePacket()
+            RevivedPacket packet = new RevivedPacket()
             {
                 reviverId = reviverId
             };
