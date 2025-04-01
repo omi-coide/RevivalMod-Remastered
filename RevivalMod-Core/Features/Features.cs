@@ -14,42 +14,68 @@ using EFT.Communications;
 using Comfort.Common;
 using RevivalMod.Helpers;
 using RevivalMod.Fika;
-using EFT.Interactive;
 using RevivalMod.Components;
 using EFT.UI;
 
 namespace RevivalMod.Features
 {
     /// <summary>
-    /// Enhanced revival feature with manual activation and temporary invulnerability with restrictions
+    /// Implements a second-chance mechanic for players, allowing them to enter a critical state
+    /// instead of dying, and use a defibrillator to revive.
     /// </summary>
     internal class RevivalFeatures : ModulePatch
     {
-        // New constants for effects
-        private static readonly float MOVEMENT_SPEED_MULTIPLIER = 0.1f; // 40% normal speed during invulnerability
-        private static readonly bool FORCE_CROUCH_DURING_INVULNERABILITY = false; // Force player to crouch during invulnerability
-        private static readonly bool DISABLE_SHOOTING_DURING_INVULNERABILITY = false; // Disable shooting during invulnerability
-        private static float _notificationTimer = 0f;
+        #region Constants
+
+        // Player movement and behavior constants
+        private const float MOVEMENT_SPEED_MULTIPLIER = 0.1f;
+        private const bool FORCE_CROUCH_DURING_INVULNERABILITY = false;
+        private const bool DISABLE_SHOOTING_DURING_INVULNERABILITY = false;
+
+        // Notification timing constants
         private const float NOTIFICATION_INTERVAL = 15f;
+        private const float CRITICAL_NOTIFICATION_INTERVAL = 30f;
+        private const float URGENT_NOTIFICATION_INTERVAL = 10f;
+        private const float CRITICAL_URGENT_THRESHOLD = 30f;
 
-        // States
-        private static Dictionary<string, long> _lastRevivalTimesByPlayer = new Dictionary<string, long>();
-        private static Dictionary<string, bool> _playerInCriticalState = new Dictionary<string, bool>();
-        private static Dictionary<string, EDamageType> _playerInCriticalStateDamageInfo = new Dictionary<string, EDamageType>();
-        private static Dictionary<string, bool> _playerIsInvulnerable = new Dictionary<string, bool>();
-        private static Dictionary<string, float> _playerInvulnerabilityTimers = new Dictionary<string, float>();
-        private static Dictionary<string, float> _playerCriticalStateTimers = new Dictionary<string, float>();
-        private static Dictionary<string, float> _originalAwareness = new Dictionary<string, float>(); // Renamed from _criticalModeTags
-        private static Dictionary<string, float> _originalMovementSpeed = new Dictionary<string, float>(); // Store original movement speed
-        private static Dictionary<string, EFT.PlayerAnimator.EWeaponAnimationType> _originalWeaponAnimationType = new Dictionary<string, PlayerAnimator.EWeaponAnimationType>();
-        private static Player PlayerClient { get; set; } = null;
-        private static Dictionary<string, bool> _revivablePlayers = new Dictionary<string, bool>();
+        // Visual effect constants
+        private const float FLASH_INTERVAL = 0.5f;
 
-        public static Dictionary<string, bool> KillOverridePlayers = new Dictionary<string, bool>();
+        #endregion
+
+        #region State Tracking
+
+        // Timers and state for notifications
+        private static float _notificationTimer = 0f;
+
+        // Player state dictionaries
+        private static readonly Dictionary<string, long> _lastRevivalTimesByPlayer = new Dictionary<string, long>();
+        private static readonly Dictionary<string, bool> _playerInCriticalState = new Dictionary<string, bool>();
+        private static readonly Dictionary<string, EDamageType> _playerDamageTypes = new Dictionary<string, EDamageType>();
+        private static readonly Dictionary<string, bool> _playerIsInvulnerable = new Dictionary<string, bool>();
+        private static readonly Dictionary<string, float> _playerInvulnerabilityTimers = new Dictionary<string, float>();
+        private static readonly Dictionary<string, float> _playerCriticalStateTimers = new Dictionary<string, float>();
+
+        // Player original state storage for restoration
+        private static readonly Dictionary<string, float> _originalAwareness = new Dictionary<string, float>();
+        private static readonly Dictionary<string, float> _originalMovementSpeed = new Dictionary<string, float>();
+
+        // Multiplayer revival tracking
+        private static readonly Dictionary<string, bool> _revivablePlayers = new Dictionary<string, bool>();
+
+        // Reference to local player
+        private static Player PlayerClient { get; set; }
+
+        // Track overriding kill behavior
+        public static readonly Dictionary<string, bool> KillOverridePlayers = new Dictionary<string, bool>();
+
+        #endregion
+
+        #region Core Patch Implementation
 
         protected override MethodBase GetTargetMethod()
         {
-            // We're patching the Update method of Player to constantly check for revival key press
+            // Patch the Update method of Player to check for revival and manage states
             return AccessTools.Method(typeof(Player), nameof(Player.UpdateTick));
         }
 
@@ -61,333 +87,270 @@ namespace RevivalMod.Features
                 string playerId = __instance.ProfileId;
                 PlayerClient = __instance;
 
-                // Only proceed for the local player
+                // Only process for the local player
                 if (!__instance.IsYourPlayer)
                     return;
 
-                // Update invulnerability timer if active
-                if (_playerIsInvulnerable.TryGetValue(playerId, out bool isInvulnerable) && isInvulnerable)
-                {
-                    if (_playerInvulnerabilityTimers.TryGetValue(playerId, out float timer))
-                    {
-                        timer -= Time.deltaTime;
-                        _playerInvulnerabilityTimers[playerId] = timer;
-
-                        // Force player to crouch during invulnerability
-                        if (FORCE_CROUCH_DURING_INVULNERABILITY)
-                        {
-                            // Force crouch state
-                            if (__instance.MovementContext.PoseLevel > 0)
-                            {
-                                __instance.MovementContext.SetPoseLevel(0);
-                            }
-                        }
-
-                        // Disable shooting during invulnerability
-                        if (DISABLE_SHOOTING_DURING_INVULNERABILITY)
-                        {
-                            // Block shooting by canceling fire operations
-                            if (__instance.HandsController.IsAiming)
-                            {
-                                __instance.HandsController.IsAiming = false;
-                            }
-                        }
-
-                        // End invulnerability if timer is up
-                        if (timer <= 0)
-                        {
-                            EndInvulnerability(__instance);
-                        }
-                    }
-                }
-
-                if (_playerInCriticalState.TryGetValue(playerId, out bool inCritical) && inCritical)
-                {
-                    if (_playerCriticalStateTimers.TryGetValue(playerId, out float criticalTimer))
-                    {
-                        criticalTimer -= Time.deltaTime;
-                        _playerCriticalStateTimers[playerId] = criticalTimer;
-
-                        // If time runs out, player dies
-                        if (criticalTimer <= 0)
-                        {
-                            ForcePlayerDeath(__instance);
-                            return;
-                        }
-
-                        if (CheckRevivalItemInRaidInventory().Value && Settings.SELF_REVIVAL_ENABLED.Value)
-                        {
-                            if (Input.GetKeyDown(Settings.SELF_REVIVAL_KEY.Value))
-                            {
-                                TryPerformManualRevival(__instance);
-                            }
-                        }
-                        else if (criticalTimer % 30 < 0.1f && criticalTimer > 0.5f) // Show notification every 30 seconds
-                        {
-                            NotificationManagerClass.DisplayMessageNotification(
-                                $"Critical state: {(int)criticalTimer} seconds remaining to be revived",
-                                ENotificationDurationType.Default,
-                                ENotificationIconType.Alert,
-                                Color.yellow);
-                        }
-                        else if (criticalTimer <= 30 && criticalTimer % 10 < 0.1f) // More frequent in last 30 seconds
-                        {
-                            NotificationManagerClass.DisplayMessageNotification(
-                                $"URGENT: {(int)criticalTimer} seconds remaining before death",
-                                ENotificationDurationType.Default,
-                                ENotificationIconType.Alert,
-                                Color.red);
-                        }
-
-                        // Check for "give up" key press
-                        if (Input.GetKeyDown(Settings.GIVE_UP_KEY.Value))
-                        {
-                            ForcePlayerDeath(__instance);
-                            return;
-                        }
-
-                       
-                    }
-                }
-
-                if (CheckRevivalItemInRaidInventory().Value)
-                {
-
-                    Vector3 currentPos = __instance.Position;
-                    foreach (KeyValuePair<string, Vector3> critPlayer in RMSession.GetCriticalPlayers())
-                    {
-                        //// Option 1: Using Vector3.Distance (simple and clear)
-                        //if (Vector3.Distance(currentPos, critPlayer.Value) <= 2f)
-                        //{
-                        //    // The critPlayer is within 2 meters of the player.
-                        //}
-
-                        //Option 2: Using squared magnitude for performance(avoids the square root calculation)
-                        if ((currentPos - critPlayer.Value).sqrMagnitude <= 4f && (!_revivablePlayers.ContainsKey(critPlayer.Key) || !_revivablePlayers[critPlayer.Key]))
-                        {
-                            _notificationTimer -= Time.deltaTime;
-                            if (_notificationTimer <= 0)
-                            {
-                                _notificationTimer = NOTIFICATION_INTERVAL;
-                                NotificationManagerClass.DisplayMessageNotification(
-                                    $"Press {Settings.TEAM_REVIVAL_KEY.Value.ToString()} to use your defibrillator to revive your teammate!",
-                                    ENotificationDurationType.Long,
-                                    ENotificationIconType.Friend,
-                                    Color.green);
-                                Plugin.LogSource.LogDebug($"Player with id {playerId} is within 2m of critplayer with id {critPlayer}");
-                            }
-                            if (Input.GetKeyDown(Settings.TEAM_REVIVAL_KEY.Value))
-                            {
-                                bool revivalSucceeded = PerfomTeamMateRevival(critPlayer.Key, __instance);                                
-                            }
-                        }
-                    }
-                }
-
+                // Process player states
+                ProcessInvulnerabilityState(__instance, playerId);
+                ProcessCriticalState(__instance, playerId);
+                CheckForTeammateRevival(__instance);
             }
             catch (Exception ex)
             {
-                Plugin.LogSource.LogError($"Error in RevivalFeatureExtension patch: {ex.Message}");
+                Plugin.LogSource.LogError($"Error in RevivalFeatures patch: {ex.Message}");
             }
         }
 
+        #endregion
+
+        #region State Processing Methods
+
+        /// <summary>
+        /// Processes invulnerability state and timer for a player
+        /// </summary>
+        private static void ProcessInvulnerabilityState(Player player, string playerId)
+        {
+            if (!_playerIsInvulnerable.TryGetValue(playerId, out bool isInvulnerable) || !isInvulnerable)
+                return;
+
+            if (_playerInvulnerabilityTimers.TryGetValue(playerId, out float timer))
+            {
+                timer -= Time.deltaTime;
+                _playerInvulnerabilityTimers[playerId] = timer;
+
+                // Apply invulnerability restrictions
+                ApplyInvulnerabilityRestrictions(player);
+
+                // End invulnerability if timer is up
+                if (timer <= 0)
+                {
+                    EndInvulnerability(player);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Applies movement and action restrictions during invulnerability period
+        /// </summary>
+        private static void ApplyInvulnerabilityRestrictions(Player player)
+        {
+            // Force player to crouch during invulnerability if enabled
+            if (FORCE_CROUCH_DURING_INVULNERABILITY && player.MovementContext.PoseLevel > 0)
+            {
+                player.MovementContext.SetPoseLevel(0);
+            }
+
+            // Disable shooting during invulnerability if enabled
+            if (DISABLE_SHOOTING_DURING_INVULNERABILITY && player.HandsController.IsAiming)
+            {
+                player.HandsController.IsAiming = false;
+            }
+        }
+
+        /// <summary>
+        /// Processes critical state and checks for revival inputs
+        /// </summary>
+        private static void ProcessCriticalState(Player player, string playerId)
+        {
+            if (!_playerInCriticalState.TryGetValue(playerId, out bool inCritical) || !inCritical)
+                return;
+
+            if (!_playerCriticalStateTimers.TryGetValue(playerId, out float criticalTimer))
+                return;
+
+            criticalTimer -= Time.deltaTime;
+            _playerCriticalStateTimers[playerId] = criticalTimer;
+
+            // If time runs out, player dies
+            if (criticalTimer <= 0)
+            {
+                ForcePlayerDeath(player);
+                return;
+            }
+
+            // Check for self-revival if player has the item
+            CheckForSelfRevival(player, criticalTimer);
+
+            // Display countdown notifications
+            DisplayCriticalStateCountdown(criticalTimer);
+
+            // Check for "give up" key press
+            if (Input.GetKeyDown(Settings.GIVE_UP_KEY.Value))
+            {
+                ForcePlayerDeath(player);
+            }
+        }
+
+        /// <summary>
+        /// Checks if self-revival is possible and processes key input
+        /// </summary>
+        private static void CheckForSelfRevival(Player player, float remainingTime)
+        {
+            var revivalItemCheck = CheckRevivalItemInRaidInventory();
+            if (revivalItemCheck.Value && Settings.SELF_REVIVAL_ENABLED.Value)
+            {
+                if (Input.GetKeyDown(Settings.SELF_REVIVAL_KEY.Value))
+                {
+                    TryPerformManualRevival(player);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Displays countdown notifications for critical state
+        /// </summary>
+        private static void DisplayCriticalStateCountdown(float criticalTimer)
+        {
+            // Regular interval notifications
+            if (criticalTimer % CRITICAL_NOTIFICATION_INTERVAL < 0.1f && criticalTimer > 0.5f)
+            {
+                NotificationManagerClass.DisplayMessageNotification(
+                    $"Critical state: {(int)criticalTimer} seconds remaining to be revived",
+                    ENotificationDurationType.Default,
+                    ENotificationIconType.Alert,
+                    Color.yellow);
+            }
+            // More frequent notifications in the last 30 seconds
+            else if (criticalTimer <= CRITICAL_URGENT_THRESHOLD && criticalTimer % URGENT_NOTIFICATION_INTERVAL < 0.1f)
+            {
+                NotificationManagerClass.DisplayMessageNotification(
+                    $"URGENT: {(int)criticalTimer} seconds remaining before death",
+                    ENotificationDurationType.Default,
+                    ENotificationIconType.Alert,
+                    Color.red);
+            }
+        }
+
+        /// <summary>
+        /// Checks for nearby critical teammates and processes revival actions
+        /// </summary>
+        private static void CheckForTeammateRevival(Player player)
+        {
+            var revivalItemCheck = CheckRevivalItemInRaidInventory();
+            if (!revivalItemCheck.Value)
+                return;
+
+            Vector3 currentPos = player.Position;
+            foreach (KeyValuePair<string, Vector3> critPlayer in RMSession.GetCriticalPlayers())
+            {
+                // Using squared magnitude for performance (avoids square root calculation)
+                if ((currentPos - critPlayer.Value).sqrMagnitude <= 4f &&
+                    (!_revivablePlayers.ContainsKey(critPlayer.Key) || !_revivablePlayers[critPlayer.Key]))
+                {
+                    _notificationTimer -= Time.deltaTime;
+                    if (_notificationTimer <= 0)
+                    {
+                        _notificationTimer = NOTIFICATION_INTERVAL;
+                        NotificationManagerClass.DisplayMessageNotification(
+                            $"Press {Settings.TEAM_REVIVAL_KEY.Value} to use your defibrillator to revive your teammate!",
+                            ENotificationDurationType.Long,
+                            ENotificationIconType.Friend,
+                            Color.green);
+                        Plugin.LogSource.LogDebug($"Player with id {player.ProfileId} is within 2m of critplayer with id {critPlayer.Key}");
+                    }
+
+                    if (Input.GetKeyDown(Settings.TEAM_REVIVAL_KEY.Value))
+                    {
+                        PerformTeammateRevival(critPlayer.Key, player);
+                    }
+                }
+            }
+        }
+
+        #endregion
+
+        #region Public API Methods
+
+        /// <summary>
+        /// Checks if a player is currently in critical state
+        /// </summary>
         public static bool IsPlayerInCriticalState(string playerId)
         {
             return _playerInCriticalState.TryGetValue(playerId, out bool inCritical) && inCritical;
         }
 
+        /// <summary>
+        /// Checks if a player is currently invulnerable
+        /// </summary>
+        public static bool IsPlayerInvulnerable(string playerId)
+        {
+            return _playerIsInvulnerable.TryGetValue(playerId, out bool invulnerable) && invulnerable;
+        }
+
+        /// <summary>
+        /// Sets a player's critical state status
+        /// </summary>
         public static void SetPlayerCriticalState(Player player, bool criticalState, EDamageType damageType)
         {
             if (player == null)
                 return;
 
-            string playerId = player.ProfileId;           
+            string playerId = player.ProfileId;
 
             // Update critical state
             _playerInCriticalState[playerId] = criticalState;
-            _playerInCriticalStateDamageInfo[playerId] = damageType;
+            _playerDamageTypes[playerId] = damageType;
 
             if (criticalState)
             {
-           
-                // Set the critical state timer
-                _playerCriticalStateTimers[playerId] = Settings.TIME_TO_REVIVE.Value;
-
-                _playerIsInvulnerable[playerId] = true;
-
-                ApplyCriticalEffects(player);
-
-                ApplyRevivableStatePlayer(player);
-
-                if (player.IsYourPlayer)
-                {
-                    try
-                    {
-                        // Show revival options message
-                        string message = "CRITICAL CONDITION!\n";
-
-                        if (Settings.SELF_REVIVAL_ENABLED.Value && CheckRevivalItemInRaidInventory().Value)
-                        {
-                            message += $"Press {Settings.SELF_REVIVAL_KEY.Value.ToString()} to use defibrillator\n";
-                        }
-
-                        message += $"Press {Settings.GIVE_UP_KEY.Value.ToString()} to give up\n";
-                        message += $"Or wait for a teammate to revive you ({(int)Settings.TIME_TO_REVIVE.Value} seconds)";
-
-                        NotificationManagerClass.DisplayMessageNotification(
-                            message,
-                            ENotificationDurationType.Long,
-                            ENotificationIconType.Default,
-                            Color.red);
-                    }
-                    catch (Exception ex)
-                    {
-                        Plugin.LogSource.LogError($"Error displaying critical state UI: {ex.Message}");
-                    }
-                }
+                InitializeCriticalState(player, playerId);
             }
             else
             {
-                // Remove from critical state timer tracking
-                _playerCriticalStateTimers.Remove(playerId);
-
-                // If player is leaving critical state without revival (e.g., revival failed),
-                // make sure to remove stealth from player and disable invulnerability
-                if (!_playerInvulnerabilityTimers.ContainsKey(playerId))
-                {
-                    RemoveStealthFromPlayer(player);
-                    _playerIsInvulnerable.Remove(playerId);
-
-                    // Remove any applied effects
-                    RestorePlayerMovement(player);
-                }
+                CleanupCriticalState(player, playerId);
             }
         }
 
-        // Apply effects for critical state without healing
-        private static void ApplyCriticalEffects(Player player)
+        /// <summary>
+        /// Attempts to perform revival of player by a teammate
+        /// </summary>
+        public static bool TryPerformRevivalByTeammate(string playerId)
         {
+            if (playerId != Singleton<GameWorld>.Instance.MainPlayer.ProfileId)
+                return false;
+
+            Player player = Singleton<GameWorld>.Instance.MainPlayer;
+
             try
             {
-                string playerId = player.ProfileId;
+                // Apply revival effects
+                ApplyRevivalEffects(player);
 
-                // Store original movement speed
-                if (!_originalMovementSpeed.ContainsKey(playerId))
-                {
-                    _originalMovementSpeed[playerId] = player.Physical.WalkSpeedLimit;
-                }
+                // Apply invulnerability
+                StartInvulnerability(player);
 
-                // Apply tremor effect
-                player.ActiveHealthController.DoContusion(Settings.REVIVAL_DURATION.Value, 1f);
-                player.ActiveHealthController.DoStun(Settings.REVIVAL_DURATION.Value / 2, 1f);
+                // Reset critical state
+                _playerInCriticalState[playerId] = false;
 
-                // Severe movement restrictions - extremely slow movement
-                player.Physical.WalkSpeedLimit = MOVEMENT_SPEED_MULTIPLIER; // No movement
+                // Set last revival time
+                _lastRevivalTimesByPlayer[playerId] = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
 
-                // Restrict player to crouch-only
-                if (player.MovementContext != null)
-                {
-                    // Force crouch
-                    player.MovementContext.SetPoseLevel(0f, true);
-                    player.ResetLookDirection();
-                    player.ActiveHealthController.SetStaminaCoeff(0f);
-                }
+                // Show successful revival notification
+                NotificationManagerClass.DisplayMessageNotification(
+                    "Defibrillator used successfully! You are temporarily invulnerable but limited in movement.",
+                    ENotificationDurationType.Long,
+                    ENotificationIconType.Default,
+                    Color.green);
 
-                Plugin.LogSource.LogDebug($"Applied critical effects to player {playerId}");
+                Plugin.LogSource.LogInfo($"Team revival performed for player {playerId}");
+                return true;
             }
             catch (Exception ex)
             {
-                Plugin.LogSource.LogError($"Error applying critical effects: {ex.Message}");
+                Plugin.LogSource.LogError($"Error in teammate revival: {ex}");
+                return false;
             }
         }
 
-        // Restore player movement after invulnerability ends
-        private static void RestorePlayerMovement(Player player)
-        {
-            try
-            {
-                string playerId = player.ProfileId;
-
-                // Restore original movement speed if we stored it
-                if (_originalMovementSpeed.TryGetValue(playerId, out float originalSpeed))
-                {
-                    player.Physical.WalkSpeedLimit = originalSpeed;
-                    _originalMovementSpeed.Remove(playerId);
-                }
-
-                player.MovementContext.SetPoseLevel(1f);
-
-                Plugin.LogSource.LogDebug($"Restored movement for player {playerId}");
-            }
-            catch (Exception ex)
-            {
-                Plugin.LogSource.LogError($"Error restoring player movement: {ex.Message}");
-            }
-        }
-
-        // Method to make player invisible to AI - improved implementation
-        private static void  ApplyRevivableStatePlayer(Player player)
-        {
-            try
-            {
-                string playerId = player.ProfileId;
-
-                // Skip if already applied
-                if (_originalAwareness.ContainsKey(playerId))
-                    return;
-
-                // Store original awareness value
-                _originalAwareness[playerId] = player.Awareness;
-
-                // Set awareness to 0 to make bots not detect the player
-                player.Awareness = 0f;
-                player.PlayDeathSound();
-                player.HandsController.IsAiming = false;
-                player.MovementContext.EnableSprint(false);
-                player.MovementContext.SetPoseLevel(0f, true);
-                player.MovementContext.IsInPronePose = true;
-                player.SetEmptyHands(null);
-                player.ActiveHealthController.IsAlive = false;
-                FikaBridge.SendPlayerPositionPacket(playerId, new DateTime(), player.Position);
-                Plugin.LogSource.LogDebug($"Applied improved stealth mode to player {playerId}");
-                Plugin.LogSource.LogDebug($"Stealth Mode Variables, Current Awareness: {player.Awareness}, IsAlive: {player.ActiveHealthController.IsAlive}");
-            }
-            catch (Exception ex)
-            {
-                Plugin.LogSource.LogError($"Error applying stealth mode: {ex.Message}");
-            }
-        }
-
-        // Method to remove invisibility from player
-        private static void RemoveStealthFromPlayer(Player player)
-        {
-            try
-            {
-                string playerId = player.ProfileId;
-                if (!_originalAwareness.ContainsKey(playerId)) return;
-
-                player.Awareness = _originalAwareness[playerId];
-                _originalAwareness.Remove(playerId);
-
-                player.IsVisible = true;
-                player.ActiveHealthController.IsAlive = true;
-                player.ActiveHealthController.DoContusion(25f, 0.25f);
-                player.Awareness = 350f;
-
-                Plugin.LogSource.LogInfo($"Removed stealth mode from player {playerId}");
-                
-            }
-            catch (Exception ex)
-            {
-                Plugin.LogSource.LogError($"Error removing stealth mode: {ex.Message}");
-            }
-        }
-
+        /// <summary>
+        /// Checks if the player has a revival item in their inventory
+        /// </summary>
         public static KeyValuePair<string, bool> CheckRevivalItemInRaidInventory()
         {
-
             try
             {
+                // Get player reference if needed
                 if (PlayerClient == null)
                 {
                     if (Singleton<GameWorld>.Instantiated)
@@ -405,6 +368,7 @@ namespace RevivalMod.Features
                     return new KeyValuePair<string, bool>(string.Empty, false);
                 }
 
+                // Check for revival item
                 string playerId = PlayerClient.ProfileId;
                 var inRaidItems = PlayerClient.Inventory.GetPlayerItems(EPlayerItems.Equipment);
                 bool hasItem = inRaidItems.Any(item => item.TemplateId == Constants.Constants.ITEM_ID);
@@ -413,11 +377,85 @@ namespace RevivalMod.Features
             }
             catch (Exception ex)
             {
+                Plugin.LogSource.LogError($"Error checking revival item: {ex.Message}");
                 return new KeyValuePair<string, bool>(string.Empty, false);
             }
         }
 
+        #endregion
 
+        #region Revival Implementation
+
+        /// <summary>
+        /// Initializes critical state for a player
+        /// </summary>
+        private static void InitializeCriticalState(Player player, string playerId)
+        {
+            // Set the critical state timer
+            _playerCriticalStateTimers[playerId] = Settings.TIME_TO_REVIVE.Value;
+            _playerIsInvulnerable[playerId] = true;
+
+            // Apply effects and make player revivable
+            ApplyCriticalEffects(player);
+            ApplyRevivableState(player);
+
+            // Show UI notification for local player
+            if (player.IsYourPlayer)
+            {
+                DisplayCriticalStateNotification(player);
+            }
+        }
+
+        /// <summary>
+        /// Displays critical state notification with available options
+        /// </summary>
+        private static void DisplayCriticalStateNotification(Player player)
+        {
+            try
+            {
+                // Build notification message
+                string message = "CRITICAL CONDITION!\n";
+
+                if (Settings.SELF_REVIVAL_ENABLED.Value && CheckRevivalItemInRaidInventory().Value)
+                {
+                    message += $"Press {Settings.SELF_REVIVAL_KEY.Value} to use defibrillator\n";
+                }
+
+                message += $"Press {Settings.GIVE_UP_KEY.Value} to give up\n";
+                message += $"Or wait for a teammate to revive you ({(int)Settings.TIME_TO_REVIVE.Value} seconds)";
+
+                NotificationManagerClass.DisplayMessageNotification(
+                    message,
+                    ENotificationDurationType.Long,
+                    ENotificationIconType.Default,
+                    Color.red);
+            }
+            catch (Exception ex)
+            {
+                Plugin.LogSource.LogError($"Error displaying critical state UI: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Cleans up critical state when exiting that state
+        /// </summary>
+        private static void CleanupCriticalState(Player player, string playerId)
+        {
+            // Remove from critical state timer tracking
+            _playerCriticalStateTimers.Remove(playerId);
+
+            // If player is leaving critical state without revival, clean up
+            if (!_playerInvulnerabilityTimers.ContainsKey(playerId))
+            {
+                RemoveRevivableState(player);
+                _playerIsInvulnerable.Remove(playerId);
+                RestorePlayerMovement(player);
+            }
+        }
+
+        /// <summary>
+        /// Attempts to perform manual revival
+        /// </summary>
         public static bool TryPerformManualRevival(Player player)
         {
             if (player == null)
@@ -428,64 +466,13 @@ namespace RevivalMod.Features
             // Check if the player has the revival item
             bool hasDefib = CheckRevivalItemInRaidInventory().Value;
 
-            // Check if the revival is on cooldown
-            bool isOnCooldown = false;
-            if (_lastRevivalTimesByPlayer.TryGetValue(playerId, out long lastRevivalTime))
-            {
-                long currentTime = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                isOnCooldown = (currentTime - lastRevivalTime) < Settings.REVIVAL_COOLDOWN.Value;
-            }
-
-            if (isOnCooldown)
-            {
-                // Calculate remaining cooldown
-                long currentTime = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                int remainingCooldown = (int)(Settings.REVIVAL_COOLDOWN.Value - (currentTime - lastRevivalTime));
-
-                NotificationManagerClass.DisplayMessageNotification(
-                    $"Revival on cooldown! Available in {remainingCooldown} seconds",
-                    ENotificationDurationType.Long,
-                    ENotificationIconType.Alert,
-                    Color.yellow);
-                if (!Settings.TESTING.Value) return false;
-
-            }
+            // Check if revival is on cooldown
+            if (IsRevivalOnCooldown(playerId))
+                return false;
 
             if (hasDefib || Settings.TESTING.Value)
             {
-                // Consume the item
-                if (hasDefib && !Settings.TESTING.Value)
-                {
-                    ConsumeDefibItem(player);
-                }
-
-                FikaBridge.SendRemovePlayerFromCriticalPlayersListPacket(playerId);
-
-                // Apply revival effects - now with limited healing
-                ApplyRevivalEffects(player);
-
-                // Apply invulnerability
-                StartInvulnerability(player);
-
-                player.Say(EPhraseTrigger.OnMutter, false, 2f, ETagStatus.Combat, 100, true);
-
-                // Reset critical state
-                _playerInCriticalState[playerId] = false;
-
-
-
-                // Set last revival time
-                _lastRevivalTimesByPlayer[playerId] = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-
-                // Show successful revival notification
-                NotificationManagerClass.DisplayMessageNotification(
-                    "Defibrillator used successfully! You are temporarily invulnerable but limited in movement.",
-                    ENotificationDurationType.Long,
-                    ENotificationIconType.Default,
-                    Color.green);
-
-                Plugin.LogSource.LogInfo($"Manual revival performed for player {playerId}");
-                return true;
+                return PerformRevival(player, playerId, hasDefib);
             }
             else
             {
@@ -499,49 +486,59 @@ namespace RevivalMod.Features
             }
         }
 
-        public static bool PerfomTeamMateRevival(string playerId, Player reviver)
+        /// <summary>
+        /// Checks if revival is on cooldown and shows notification if needed
+        /// </summary>
+        private static bool IsRevivalOnCooldown(string playerId)
         {
-            try
-            {
-                NotificationManagerClass.DisplayMessageNotification(
-                   "Attempting to revive teammate...",
-                   ENotificationDurationType.Default,
-                   ENotificationIconType.Friend,
-                   Color.green);
-
-                ConsumeDefibItem(reviver);
-                RMSession.RemovePlayerFromCriticalPlayers(playerId);
-                    
-                FikaBridge.SendRemovePlayerFromCriticalPlayersListPacket(playerId);
-                FikaBridge.SendReviveMePacket(playerId, reviver.ProfileId);
-                      
-                return true;
-    
-            }
-            catch (Exception e)
-            {
-                Plugin.LogSource.LogError(e);
+            if (!_lastRevivalTimesByPlayer.TryGetValue(playerId, out long lastRevivalTime))
                 return false;
+
+            long currentTime = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            bool isOnCooldown = (currentTime - lastRevivalTime) < Settings.REVIVAL_COOLDOWN.Value;
+
+            if (isOnCooldown)
+            {
+                // Only show notification if not in test mode
+                if (!Settings.TESTING.Value)
+                {
+                    int remainingCooldown = (int)(Settings.REVIVAL_COOLDOWN.Value - (currentTime - lastRevivalTime));
+                    NotificationManagerClass.DisplayMessageNotification(
+                        $"Revival on cooldown! Available in {remainingCooldown} seconds",
+                        ENotificationDurationType.Long,
+                        ENotificationIconType.Alert,
+                        Color.yellow);
+                    return true;
+                }
             }
+
+            return false;
         }
 
-        public static bool TryPerformRevivalByTeamMate(string playerId)
+        /// <summary>
+        /// Performs the actual revival process
+        /// </summary>
+        private static bool PerformRevival(Player player, string playerId, bool hasDefib)
         {
-           
-            if (playerId != Singleton<GameWorld>.Instance.MainPlayer.ProfileId) return false;
-            Player player = Singleton<GameWorld>.Instance.MainPlayer;
+            // Consume the item if not in test mode
+            if (hasDefib && !Settings.TESTING.Value)
+            {
+                ConsumeDefibItem(player);
+            }
 
-            try {
-            // Apply revival effects - now with limited healing
+            // Remove from critical players list for multiplayer sync
+            FikaBridge.SendRemovePlayerFromCriticalPlayersListPacket(playerId);
+
+            // Apply revival effects with limited healing
             ApplyRevivalEffects(player);
 
-            // Apply invulnerability
+            // Apply invulnerability period
             StartInvulnerability(player);
+
+            player.Say(EPhraseTrigger.OnMutter, false, 2f, ETagStatus.Combat, 100, true);
 
             // Reset critical state
             _playerInCriticalState[playerId] = false;
-
-
 
             // Set last revival time
             _lastRevivalTimesByPlayer[playerId] = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
@@ -555,31 +552,62 @@ namespace RevivalMod.Features
 
             Plugin.LogSource.LogInfo($"Manual revival performed for player {playerId}");
             return true;
+        }
+
+        /// <summary>
+        /// Revives a teammate by a player with a defibrillator
+        /// </summary>
+        public static bool PerformTeammateRevival(string targetPlayerId, Player reviver)
+        {
+            try
+            {
+                NotificationManagerClass.DisplayMessageNotification(
+                   "Attempting to revive teammate...",
+                   ENotificationDurationType.Default,
+                   ENotificationIconType.Friend,
+                   Color.green);
+
+                ConsumeDefibItem(reviver);
+                RMSession.RemovePlayerFromCriticalPlayers(targetPlayerId);
+
+                FikaBridge.SendRemovePlayerFromCriticalPlayersListPacket(targetPlayerId);
+                FikaBridge.SendReviveMePacket(targetPlayerId, reviver.ProfileId);
+
+                return true;
             }
-            catch(Exception e) {
-                Plugin.LogSource.LogError(e);
-               return false;
+            catch (Exception ex)
+            {
+                Plugin.LogSource.LogError($"Error in teammate revival: {ex}");
+                return false;
             }
         }
 
-        // Fix the type parameter issue by ensuring MedKitComponent implements IItemComponent
+        /// <summary>
+        /// Consumes a defibrillator item from the player's inventory
+        /// </summary>
         private static void ConsumeDefibItem(Player player)
         {
             try
             {
                 var inRaidItems = player.Inventory.GetPlayerItems(EPlayerItems.Equipment);
                 Item defibItem = inRaidItems.FirstOrDefault(item => item.TemplateId == Constants.Constants.ITEM_ID);
-                Plugin.LogSource.LogDebug($"Found defib item: {defibItem?.TemplateId}");
-                defibItem.GetItemComponent<MedKitComponent>().HpResource = 0f;
-                ItemAddress itemAdress = defibItem.GetItemComponent<MedKitComponent>().Item.CurrentAddress;
-                itemAdress.RemoveWithoutRestrictions(defibItem);
 
-                if (defibItem != null)
+                if (defibItem == null)
                 {
-
-                    ItemUiContext context = ItemUiContext.Instance;
-                    context.UseAll(defibItem);
+                    Plugin.LogSource.LogWarning("No defibrillator item found to consume");
+                    return;
                 }
+
+                Plugin.LogSource.LogDebug($"Found defib item: {defibItem.TemplateId}");
+
+                // Deplete the item and remove it
+                defibItem.GetItemComponent<MedKitComponent>().HpResource = 0f;
+                ItemAddress itemAddress = defibItem.GetItemComponent<MedKitComponent>().Item.CurrentAddress;
+                itemAddress.RemoveWithoutRestrictions(defibItem);
+
+                // Use the item through UI context
+                ItemUiContext context = ItemUiContext.Instance;
+                context.UseAll(defibItem);
             }
             catch (Exception ex)
             {
@@ -587,11 +615,204 @@ namespace RevivalMod.Features
             }
         }
 
+        #endregion
+
+        #region Player Status Effects
+
+        /// <summary>
+        /// Applies critical state effects to player
+        /// </summary>
+        private static void ApplyCriticalEffects(Player player)
+        {
+            try
+            {
+                string playerId = player.ProfileId;
+
+                // Store original movement speed if not already stored
+                if (!_originalMovementSpeed.ContainsKey(playerId))
+                {
+                    _originalMovementSpeed[playerId] = player.Physical.WalkSpeedLimit;
+                }
+
+                // Apply visual and movement effects
+                player.ActiveHealthController.DoContusion(Settings.REVIVAL_DURATION.Value, 1f);
+                player.ActiveHealthController.DoStun(Settings.REVIVAL_DURATION.Value / 2, 1f);
+
+                // Severely restrict movement
+                player.Physical.WalkSpeedLimit = MOVEMENT_SPEED_MULTIPLIER;
+
+                // Force player to crouch
+                if (player.MovementContext != null)
+                {
+                    player.MovementContext.SetPoseLevel(0f, true);
+                    player.ResetLookDirection();
+                    player.ActiveHealthController.SetStaminaCoeff(0f);
+                }
+
+                Plugin.LogSource.LogDebug($"Applied critical effects to player {playerId}");
+            }
+            catch (Exception ex)
+            {
+                Plugin.LogSource.LogError($"Error applying critical effects: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Restores player movement capabilities after critical/invulnerable state
+        /// </summary>
+        private static void RestorePlayerMovement(Player player)
+        {
+            try
+            {
+                string playerId = player.ProfileId;
+
+                // Restore original movement speed if we stored it
+                if (_originalMovementSpeed.TryGetValue(playerId, out float originalSpeed))
+                {
+                    player.Physical.WalkSpeedLimit = originalSpeed;
+                    _originalMovementSpeed.Remove(playerId);
+                }
+
+                // Reset pose to standing
+                player.MovementContext.SetPoseLevel(1f);
+
+                Plugin.LogSource.LogDebug($"Restored movement for player {playerId}");
+            }
+            catch (Exception ex)
+            {
+                Plugin.LogSource.LogError($"Error restoring player movement: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Makes the player enter a revivable state where AI ignores them
+        /// </summary>
+        private static void ApplyRevivableState(Player player)
+        {
+            try
+            {
+                string playerId = player.ProfileId;
+
+                // Skip if already applied
+                if (_originalAwareness.ContainsKey(playerId))
+                    return;
+
+                // Store original awareness value
+                _originalAwareness[playerId] = player.Awareness;
+
+                // Configure player for revivable state
+                player.Awareness = 0f;
+                player.PlayDeathSound();
+                player.HandsController.IsAiming = false;
+                player.MovementContext.EnableSprint(false);
+                player.MovementContext.SetPoseLevel(0f, true);
+                player.MovementContext.IsInPronePose = true;
+                player.SetEmptyHands(null);
+                player.ActiveHealthController.IsAlive = false;
+
+                GClass3756.ReleaseBeginSample("Player.OnDead.SoundWork", "OnDead");
+                if (player.ShouldVocalizeDeath(player.LastDamagedBodyPart))
+                {
+                    EPhraseTrigger trigger = player.LastDamageType.IsWeaponInduced() ? EPhraseTrigger.OnDeath : EPhraseTrigger.OnAgony;
+                    try
+                    {
+                        player.Speaker.Play(trigger, player.HealthStatus, true, null);
+                        goto IL_12F;
+                    }
+                    catch (Exception ex)
+                    {
+                        UnityEngine.Debug.LogError(ex.Message);
+                        goto IL_12F;
+                    }
+                }
+                IL_12F:
+                player.MovementContext.ReleaseDoorIfInteractingWithOne();
+                player.MovementContext.OnStateChanged -= player.method_17;
+                player.MovementContext.PhysicalConditionChanged -= player.ProceduralWeaponAnimation.PhysicalConditionUpdated;
+                //player.HandsController.OnPlayerDead();
+
+                if (player.MovementContext.StationaryWeapon != null)
+                {
+                    player.MovementContext.StationaryWeapon.Unlock(player.ProfileId);
+                }
+                if (player.MovementContext.StationaryWeapon != null && player.MovementContext.StationaryWeapon.Item == player.HandsController.Item)
+                {
+                    player.MovementContext.StationaryWeapon.Show();
+                    player.ReleaseHand();
+                    return;
+                }
+                
+
+                PropertyInfo corpseProperty = typeof(Player).GetProperty("Corpse",
+                    BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+
+                // Get the protected CreateCorpse method
+                MethodInfo createCorpseMethod = typeof(Player).GetMethod("CreateCorpse",
+                    BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+
+                if (corpseProperty != null && createCorpseMethod != null)
+                {
+                    // Invoke the CreateCorpse method on the player instance
+                    object corpse = createCorpseMethod.Invoke(player, null);
+
+                    // Set the Corpse property with the new corpse
+                    corpseProperty.SetValue(player, corpse);
+
+                    Plugin.LogSource.LogDebug($"Created and assigned corpse for player {playerId}");
+                }
+
+                else
+                {
+                    Plugin.LogSource.LogWarning("Could not find Corpse property or CreateCorpse method via reflection");
+                }
+
+                // Synchronize state for multiplayer
+                FikaBridge.SendPlayerPositionPacket(playerId, new DateTime(), player.Position);
+
+                Plugin.LogSource.LogDebug($"Applied revivable state to player {playerId}");
+                Plugin.LogSource.LogDebug($"Revivable State Variables - Awareness: {player.Awareness}, IsAlive: {player.ActiveHealthController.IsAlive}");
+            }
+            catch (Exception ex)
+            {
+                Plugin.LogSource.LogError($"Error applying revivable state: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Removes the revivable state from a player
+        /// </summary>
+        private static void RemoveRevivableState(Player player)
+        {
+            try
+            {
+                string playerId = player.ProfileId;
+                if (!_originalAwareness.ContainsKey(playerId))
+                    return;
+
+                // Restore awareness and visibility
+                player.Awareness = _originalAwareness[playerId];
+                _originalAwareness.Remove(playerId);
+
+                player.IsVisible = true;
+                player.ActiveHealthController.IsAlive = true;
+                player.ActiveHealthController.DoContusion(25f, 0.25f);
+                player.Awareness = 350f;
+
+                Plugin.LogSource.LogInfo($"Removed revivable state from player {playerId}");
+            }
+            catch (Exception ex)
+            {
+                Plugin.LogSource.LogError($"Error removing revivable state: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Applies revival effects to the player with limited healing
+        /// </summary>
         private static void ApplyRevivalEffects(Player player)
         {
             try
             {
-                // Modified to provide limited healing instead of full healing
                 ActiveHealthController healthController = player.ActiveHealthController;
                 if (healthController == null)
                 {
@@ -599,30 +820,25 @@ namespace RevivalMod.Features
                     return;
                 }
 
-                // Remove negative effects
-                //RemoveAllNegativeEffects(healthController);
-
-                if (!Settings.HARDCORE_MODE.Value && Settings.RESTORE_DESTROYED_BODY_PARTS.Value) {
-                    // Apply limited healing - enough to survive but not full health
-
+                // Restore destroyed body parts if setting enabled and not in hardcore mode
+                if (!Settings.HARDCORE_MODE.Value && Settings.RESTORE_DESTROYED_BODY_PARTS.Value)
+                {
                     foreach (EBodyPart bodyPart in Enum.GetValues(typeof(EBodyPart)))
                     {
-                        Plugin.LogSource.LogDebug($"{bodyPart.ToString()} is on {healthController.GetBodyPartHealth(bodyPart).Current} health.");
-                        if (healthController.GetBodyPartHealth(bodyPart).Current < 1) { 
+                        Plugin.LogSource.LogDebug($"{bodyPart} is at {healthController.GetBodyPartHealth(bodyPart).Current} health");
+                        if (healthController.GetBodyPartHealth(bodyPart).Current < 1)
+                        {
                             healthController.FullRestoreBodyPart(bodyPart);
-                            Plugin.LogSource.LogDebug($"Restored {bodyPart.ToString()}.");
+                            Plugin.LogSource.LogDebug($"Restored {bodyPart}");
                         }
                     }
                 }
 
-                //// Apply painkillers effect
-                //healthController.DoPainKiller();
-
-                // Apply tremor effect
+                // Apply disorientation effects
                 healthController.DoContusion(Settings.REVIVAL_DURATION.Value, 1f);
                 healthController.DoStun(Settings.REVIVAL_DURATION.Value / 2, 1f);
 
-                Plugin.LogSource.LogInfo("Applied limited revival effects to player");
+                Plugin.LogSource.LogInfo("Applied revival effects to player");
             }
             catch (Exception ex)
             {
@@ -630,30 +846,9 @@ namespace RevivalMod.Features
             }
         }
 
-        private static void RemoveAllNegativeEffects(ActiveHealthController healthController)
-        {
-            try
-            {
-                MethodInfo removeNegativeEffectsMethod = AccessTools.Method(typeof(ActiveHealthController), "RemoveNegativeEffects");
-                if (removeNegativeEffectsMethod != null)
-                {
-                    foreach (EBodyPart bodyPart in Enum.GetValues(typeof(EBodyPart)))
-                    {
-                        try
-                        {
-                            removeNegativeEffectsMethod.Invoke(healthController, new object[] { bodyPart });
-                        }
-                        catch { }
-                    }
-                    Plugin.LogSource.LogInfo("Removed all negative effects from player");
-                }
-            }
-            catch (Exception ex)
-            {
-                Plugin.LogSource.LogError($"Error removing effects: {ex.Message}");
-            }
-        }
-
+        /// <summary>
+        /// Starts invulnerability period for a player
+        /// </summary>
         private static void StartInvulnerability(Player player)
         {
             if (player == null)
@@ -666,12 +861,15 @@ namespace RevivalMod.Features
             // Apply movement restrictions
             ApplyCriticalEffects(player);
 
-            // Start coroutine for visual flashing effect
+            // Start visual effect
             player.StartCoroutine(FlashInvulnerabilityEffect(player));
 
             Plugin.LogSource.LogInfo($"Started invulnerability for player {playerId} for {Settings.REVIVAL_DURATION.Value} seconds");
         }
 
+        /// <summary>
+        /// Ends invulnerability period for a player
+        /// </summary>
         private static void EndInvulnerability(Player player)
         {
             if (player == null)
@@ -682,16 +880,16 @@ namespace RevivalMod.Features
             _playerInvulnerabilityTimers.Remove(playerId);
 
             // Remove stealth from player
-            RemoveStealthFromPlayer(player);
+            RemoveRevivableState(player);
 
             // Remove movement restrictions
             RestorePlayerMovement(player);
 
-            // Show notification that invulnerability has ended
+            // Show notification
             if (player.IsYourPlayer)
             {
                 NotificationManagerClass.DisplayMessageNotification(
-                    "Temporary invulnerability has ended.",
+                    "Temporary invulnerability has ended",
                     ENotificationDurationType.Long,
                     ENotificationIconType.Default,
                     Color.white);
@@ -700,11 +898,13 @@ namespace RevivalMod.Features
             Plugin.LogSource.LogInfo($"Ended invulnerability for player {playerId}");
         }
 
+        /// <summary>
+        /// Visual effect coroutine that makes player model flash during invulnerability
+        /// </summary>
         private static IEnumerator FlashInvulnerabilityEffect(Player player)
         {
             string playerId = player.ProfileId;
-            float flashInterval = 0.5f; // Flash every half second
-            bool isVisible = true; // Track visibility state
+            bool isVisible = true;
 
             // Store original visibility states of all renderers
             Dictionary<Renderer, bool> originalStates = new Dictionary<Renderer, bool>();
@@ -729,7 +929,7 @@ namespace RevivalMod.Features
                 }
             }
 
-            // Now flash the player model
+            // Flash the player model while invulnerable
             while (_playerIsInvulnerable.TryGetValue(playerId, out bool isInvulnerable) && isInvulnerable)
             {
                 try
@@ -760,10 +960,10 @@ namespace RevivalMod.Features
                     Plugin.LogSource.LogError($"Error in flash effect: {ex.Message}");
                 }
 
-                yield return new WaitForSeconds(flashInterval);
+                yield return new WaitForSeconds(FLASH_INTERVAL);
             }
 
-            // Always ensure player is visible when effect ends by restoring original states
+            // Ensure player is visible when effect ends
             try
             {
                 foreach (var kvp in originalStates)
@@ -776,7 +976,7 @@ namespace RevivalMod.Features
             }
             catch
             {
-                // Last resort fallback if the dictionary approach fails
+                // Fallback if the dictionary approach fails
                 if (player.PlayerBody != null && player.PlayerBody.BodySkins != null)
                 {
                     foreach (var kvp in player.PlayerBody.BodySkins)
@@ -790,11 +990,9 @@ namespace RevivalMod.Features
             }
         }
 
-        public static bool IsPlayerInvulnerable(string playerId)
-        {
-            return _playerIsInvulnerable.TryGetValue(playerId, out bool invulnerable) && invulnerable;
-        }
-
+        /// <summary>
+        /// Forces player death when revival fails or time runs out
+        /// </summary>
         private static void ForcePlayerDeath(Player player)
         {
             try
@@ -816,16 +1014,16 @@ namespace RevivalMod.Features
 
                 // Show notification about death
                 NotificationManagerClass.DisplayMessageNotification(
-                    "You have died.",
+                    "You have died",
                     ENotificationDurationType.Long,
                     ENotificationIconType.Alert,
                     Color.red);
 
-                // Get the damage type before killing
-                EDamageType damageType = _playerInCriticalStateDamageInfo[playerId];
+                // Get the damage type that initially caused critical state
+                EDamageType damageType = _playerDamageTypes.TryGetValue(playerId, out var type) ?
+                    type : EDamageType.Bullet;
 
-                // Use reflection to directly call the original Kill method, bypassing Harmony patches
-                // This is a more direct approach to avoid our own patch
+                // Use original Kill method, bypassing our patch
                 player.ActiveHealthController.IsAlive = true;
                 player.ActiveHealthController.Kill(damageType);
 
@@ -836,5 +1034,7 @@ namespace RevivalMod.Features
                 Plugin.LogSource.LogError($"Error forcing player death: {ex.Message}");
             }
         }
+
+        #endregion
     }
 }

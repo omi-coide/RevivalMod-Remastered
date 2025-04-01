@@ -165,7 +165,7 @@ namespace RevivalMod.FikaModule.Common
                 SendReviveMePacket(packet.reviveeId, packet.reviverId);
             }
             else { 
-                bool revived = Features.RevivalFeatures.TryPerformRevivalByTeamMate(packet.reviveeId);
+                bool revived = Features.RevivalFeatures.TryPerformRevivalByTeammate(packet.reviveeId);
                 if (revived)
                 {
                     SendRevivedPacket(packet.reviverId, peer);
