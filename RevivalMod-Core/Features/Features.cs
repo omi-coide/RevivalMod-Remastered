@@ -779,8 +779,10 @@ namespace RevivalMod.Features
                 
                 if (Math.Round(res - 1f) <= 0f)
                 {
+                    // currentyly we don't need to consume it.
+                    defibItem.GetItemComponent<MedKitComponent>().HpResource -= 1f;
                     // item is depleted, remove it
-                    ItemAddress itemAddress = defibItem.GetItemComponent<MedKitComponent>().Item.CurrentAddress;
+                    //ItemAddress itemAddress = defibItem.GetItemComponent<MedKitComponent>().Item.CurrentAddress;
                     // Use the item through UI context
                     //ItemUiContext context = ItemUiContext.Instance;
                     //context.UseAll(defibItem);
@@ -955,7 +957,8 @@ namespace RevivalMod.Features
                 }
                 catch (Exception ex)
                 {
-                    Plugin.LogSource.LogError($"Error creating corpse: {ex.Message}");
+                    Plugin.LogSource.LogError($"Error creating corpse: {ex.Message}: {ex.ToString()}");
+                    // Mark
                 }
 
                 // Send initial position for multiplayer sync
@@ -1222,7 +1225,8 @@ namespace RevivalMod.Features
             }
             catch (Exception ex)
             {
-                Plugin.LogSource.LogError($"Error forcing player death: {ex.Message}");
+                Plugin.LogSource.LogError($"Error forcing player death: {ex.Message}: {ex.ToString()}");
+                // Mark
             }
         }
 
