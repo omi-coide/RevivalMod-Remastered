@@ -715,9 +715,12 @@ namespace RevivalMod.Features
 
             // Set last revival time
             _lastRevivalTimesByPlayer[playerId] = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-
-            criticalStateMainTimer.StopTimer();
-            criticalStateMainTimer = null;
+            
+            if ( criticalStateMainTimer != null) 
+            {
+                criticalStateMainTimer.StopTimer();
+                criticalStateMainTimer = null;
+            }
             // Show successful revival notification
             NotificationManagerClass.DisplayMessageNotification(
                 "Defibrillator used successfully! You are temporarily invulnerable but limited in movement.",
@@ -1206,7 +1209,14 @@ namespace RevivalMod.Features
                 // Remove player from critical players list for network sync
                 RMSession.RemovePlayerFromCriticalPlayers(playerId);
                 FikaBridge.SendRemovePlayerFromCriticalPlayersListPacket(playerId);
-                criticalStateMainTimer.StopTimer();
+
+                // FIXED BUG, ProcessCriticalState set criticalStateMainTimer to null causing null exception here
+                // Ensure null check for criticalStateMainTimer.
+                if (criticalStateMainTimer != null)
+                {
+                    criticalStateMainTimer.StopTimer();
+                    criticalStateMainTimer = null;
+                }
                 // Show notification about death
                 NotificationManagerClass.DisplayMessageNotification(
                     "You have died",
