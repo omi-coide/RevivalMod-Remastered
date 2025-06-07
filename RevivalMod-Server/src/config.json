@@ -3,6 +3,7 @@
         "Trading": {
             "Trader": "Therapist",
             "AmountRoubles": 150000
-        }
+        },
+        "UsageTimes": 10
     }
 }

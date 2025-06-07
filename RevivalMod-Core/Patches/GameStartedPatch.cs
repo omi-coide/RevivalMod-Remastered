@@ -49,7 +49,7 @@ namespace RevivalMod.Patches
 
                 try
                 {
-                    hasItem = inRaidItems.Any(item => item.TemplateId == Constants.Constants.ITEM_ID);
+                    hasItem = inRaidItems.Any(item => item.TemplateId == Constants.Constants.ITEM_ID && Math.Round(item.GetItemComponent<MedKitComponent>().HpResource) > 0);
                 }
                 catch (Exception ex)
                 {

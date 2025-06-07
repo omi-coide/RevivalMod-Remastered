@@ -188,10 +188,12 @@ class RevivalMod implements IPreSptLoadMod, IPostDBLoadMod, IPostSptLoadMod {
                 
                 // Make it more compact (2x1 instead of 2x2)
                 if (items[this.defibId]._props.Width && items[this.defibId]._props.Height) {
-                    items[this.defibId]._props.Width = 2;  
+                    items[this.defibId]._props.Width = 2;
                     items[this.defibId]._props.Height = 1;
                 }
-                
+                if (items[this.defibId]._props.MaxHpResource) {
+                    items[this.defibId]._props.MaxHpResource = config.RevivalItem.UsageTimes || 1;
+                }
                 // Add a special property to make the defibrillator clearly visible
                 if (!items[this.defibId]._props.BackgroundColor) {
                     items[this.defibId]._props.BackgroundColor = "red";

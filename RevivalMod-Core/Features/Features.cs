@@ -528,7 +528,7 @@ namespace RevivalMod.Features
                 // Check for revival item
                 string playerId = PlayerClient.ProfileId;
                 var inRaidItems = PlayerClient.Inventory.GetPlayerItems(EPlayerItems.Equipment);
-                bool hasItem = inRaidItems.Any(item => item.TemplateId == Constants.Constants.ITEM_ID);
+                bool hasItem = inRaidItems.Any(item => item.TemplateId == Constants.Constants.ITEM_ID && Math.Round(item.GetItemComponent<MedKitComponent>().HpResource) > 0);
 
                 return new KeyValuePair<string, bool>(playerId, hasItem);
             }
@@ -765,7 +765,7 @@ namespace RevivalMod.Features
             try
             {
                 var inRaidItems = player.Inventory.GetPlayerItems(EPlayerItems.Equipment);
-                Item defibItem = inRaidItems.FirstOrDefault(item => item.TemplateId == Constants.Constants.ITEM_ID);
+                Item defibItem = inRaidItems.FirstOrDefault(item => item.TemplateId == Constants.Constants.ITEM_ID && Math.Round(item.GetItemComponent<MedKitComponent>().HpResource) > 0);
 
                 if (defibItem == null)
                 {
@@ -775,14 +775,24 @@ namespace RevivalMod.Features
 
                 Plugin.LogSource.LogDebug($"Found defib item: {defibItem.TemplateId}");
 
-                // Deplete the item and remove it
-                defibItem.GetItemComponent<MedKitComponent>().HpResource = 0f;
-                ItemAddress itemAddress = defibItem.GetItemComponent<MedKitComponent>().Item.CurrentAddress;
-                itemAddress.RemoveWithoutRestrictions(defibItem);
+                float res = defibItem.GetItemComponent<MedKitComponent>().HpResource;
+                
+                if (Math.Round(res - 1f) <= 0f)
+                {
+                    // item is depleted, remove it
+                    ItemAddress itemAddress = defibItem.GetItemComponent<MedKitComponent>().Item.CurrentAddress;
+                    // Use the item through UI context
+                    //ItemUiContext context = ItemUiContext.Instance;
+                    //context.UseAll(defibItem);
+                    //itemAddress.RemoveWithoutRestrictions(defibItem);
 
-                // Use the item through UI context
-                ItemUiContext context = ItemUiContext.Instance;
-                context.UseAll(defibItem);
+                } else
+                {
+                    // otherwise, use the item once
+                    defibItem.GetItemComponent<MedKitComponent>().HpResource -= 1f;
+                }
+
+
             }
             catch (Exception ex)
             {
